@@ -211,20 +211,24 @@ class StrategyRunner:
         if add_long > 0:
             resp = self.exec.open_long(add_long, last_close)
             record(resp, f"open_long_{add_long}")
-            hedge_ps = 'long' if self.cfg.position_mode.lower() == 'hedge' else None
-            if stop_loss is not None and desired_long > 0:
-                self.exec.place_stop('sell', desired_long, stop_loss, hedge_ps)
-            if take_profit is not None and desired_long > 0:
-                self.exec.place_take_profit('sell', desired_long, take_profit, hedge_ps)
+            current_long += add_long
         add_short = max(0, desired_short - current_short)
         if add_short > 0:
             resp = self.exec.open_short(add_short, last_close)
             record(resp, f"open_short_{add_short}")
+            current_short += add_short
+
+        self.exec.cancel_all_conditional()
+        if current_long > 0 and stop_loss is not None:
+            hedge_ps = 'long' if self.cfg.position_mode.lower() == 'hedge' else None
+            self.exec.place_stop('sell', current_long, stop_loss, hedge_ps)
+            if take_profit is not None:
+                self.exec.place_take_profit('sell', current_long, take_profit, hedge_ps)
+        elif current_short > 0 and stop_loss is not None:
             hedge_ps = 'short' if self.cfg.position_mode.lower() == 'hedge' else None
-            if stop_loss is not None and desired_short > 0:
-                self.exec.place_stop('buy', desired_short, stop_loss, hedge_ps)
-            if take_profit is not None and desired_short > 0:
-                self.exec.place_take_profit('buy', desired_short, take_profit, hedge_ps)
+            self.exec.place_stop('buy', current_short, stop_loss, hedge_ps)
+            if take_profit is not None:
+                self.exec.place_take_profit('buy', current_short, take_profit, hedge_ps)
 
         action_str = '|'.join(actions) if actions else None
         exec_price = prices[-1] if prices else None

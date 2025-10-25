@@ -123,6 +123,10 @@ class OrderExecutor:
             self.logger.error(f"挂止盈失败: {e}")
             return {'status': 'error', 'reason': str(e)}
 
+    def cancel_all_conditional(self):
+        """取消所有条件单。"""
+        return self.exch.cancel_all_conditional_orders()
+
     # 语义方法
     def open_long(self, amt: int, last_price: float):
         """发出开多单，自动匹配 Hedge/Net 模式。"""

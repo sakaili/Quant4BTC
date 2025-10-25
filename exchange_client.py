@@ -155,3 +155,35 @@ class ExchangeClient:
             price=None,
             params=params,
         )
+
+    def cancel_all_conditional_orders(self):
+        """取消当前合约所有条件单（止损/止盈）。"""
+        try:
+            inst_id = self.market_info.get('id')
+            if not inst_id:
+                self.logger.warning("未获取到 instId，无法取消条件单")
+                return {'status': 'error', 'reason': 'missing instId'}
+            params = {
+                'instType': 'SWAP',
+                'instId': inst_id,
+                'ordType': 'conditional',
+                'state': 'live'
+            }
+            resp = self.exchange.privateGetTradeOrdersAlgoPending(params)
+            data = (resp or {}).get('data', [])
+            if not data:
+                self.logger.info("没有需要取消的条件单")
+                return {'status': 'ok', 'cancelled': 0}
+            requests = [{'instId': inst_id, 'algoId': algo.get('algoId')} for algo in data if algo.get('algoId')]
+            cancelled = 0
+            for i in range(0, len(requests), 10):
+                batch = requests[i:i+10]
+                cancel_resp = self.exchange.privatePostTradeCancelAlgos(batch)
+                for item in (cancel_resp or {}).get('data', []):
+                    if item.get('sCode') == '0':
+                        cancelled += 1
+            self.logger.info(f"已取消 {cancelled}/{len(requests)} 个条件单")
+            return {'status': 'ok', 'cancelled': cancelled}
+        except Exception as e:
+            self.logger.error(f"取消条件单失败: {e}")
+            return {'status': 'error', 'reason': str(e)}
