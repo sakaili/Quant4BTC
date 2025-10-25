@@ -141,10 +141,9 @@ class ExchangeClient:
         params: dict = {
             'tdMode': self.cfg.margin_mode,
             'reduceOnly': True,
-            'takeProfit': {
-                'triggerPrice': float(self.price_to_precision(trigger_price)),
-                'type': 'market',
-            },
+            'tpTriggerPx': float(self.price_to_precision(trigger_price)),
+            'tpTriggerPxType': 'last',
+            'tpOrdPx': '-1',  # -1 代表市价执行
         }
         if self.cfg.position_mode.lower() == 'hedge' and pos_side in ('long', 'short'):
             params['posSide'] = pos_side
