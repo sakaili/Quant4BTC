@@ -59,6 +59,7 @@ class Config:
 
     # 日志
     csv_log_file: str = os.getenv('CSV_LOG_FILE', 'trade_log.csv')
+    symbols_env: str = os.getenv('CONTRACT_SYMBOLS', '')
 
     # 风险管理
     initial_capital: float = float(os.getenv('INITIAL_CAPITAL', '500'))
@@ -83,6 +84,15 @@ class Config:
         if self.http_proxy or self.https_proxy:
             return {'http': self.http_proxy, 'https': self.https_proxy}
         return None
+
+    @property
+    def symbol_list(self) -> list[str]:
+        raw = self.symbols_env.strip()
+        if not raw:
+            return [self.symbol]
+        parts = [p.strip() for p in raw.split(',')]
+        symbols = [p for p in parts if p]
+        return symbols or [self.symbol]
 
 
 def setup_logging(level: str):

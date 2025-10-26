@@ -1,6 +1,7 @@
 ﻿# selector.py
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
 from config import Config
 from indicators import IndicatorEngine
 from evaluator import Evaluator
@@ -59,28 +60,21 @@ class FactorSelector:
 
     @staticmethod
     def _kmeans_labels(X: np.ndarray, k: int = 3, iters: int = 200):
-        """简易 KMeans 实现，返回簇标签和质心。"""
+        """使用 sklearn 的 KMeans 聚类，返回簇标签和质心。"""
         X = np.asarray(X, dtype=float)
-        if len(X) < k:
-            return np.zeros(len(X), dtype=int), np.array([X.mean(axis=0)])
-        qs = np.percentile(X, np.linspace(0, 100, k + 2)[1:-1], axis=0)
-        centroids = np.vstack(qs)
-
-        def assign(x, c):
-            d = ((x[:, None, :] - c[None, :, :]) ** 2).sum(axis=2)
-            return d.argmin(axis=1)
-
-        for _ in range(iters):
-            idxs = assign(X, centroids)
-            new_c = []
-            for j in range(centroids.shape[0]):
-                pts = X[idxs == j]
-                new_c.append(pts.mean(axis=0) if len(pts) else centroids[j])
-            new_c = np.array(new_c)
-            if np.allclose(new_c, centroids, atol=1e-8):
-                break
-            centroids = new_c
-        return assign(X, centroids), centroids
+        n, _ = X.shape
+        if n < k:
+            return np.zeros(n, dtype=int), np.array([X.mean(axis=0)])
+        model = KMeans(
+            n_clusters=k,
+            init='k-means++',
+            n_init=10,
+            max_iter=iters,
+            random_state=42,
+        )
+        labels = model.fit_predict(X)
+        centroids = model.cluster_centers_
+        return labels, centroids
 
     def _select_cluster_metric_space(self, df_atr: pd.DataFrame) -> float:
         """基于 KMeans 聚类的绩效空间选参。"""
