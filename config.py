@@ -65,6 +65,7 @@ class Config:
     risk_per_trade: float = float(os.getenv('RISK_PER_TRADE', '0.05'))
     daily_drawdown_limit: float = float(os.getenv('DAILY_DRAWDOWN_LIMIT', '0.10'))
     overall_drawdown_limit: float = float(os.getenv('OVERALL_DRAWDOWN_LIMIT', '0.30'))
+    stop_loss_pct: float = float(os.getenv('STOP_LOSS_PCT', '0.05'))
 
     # 信号质量控制
     signal_confirm: int = int(os.getenv('SIGNAL_CONFIRM', '2'))

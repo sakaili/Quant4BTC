@@ -32,26 +32,19 @@ class StrategyRunner:
         self._global_kill = False
 
     def _risk_levels(self, last_close: float, st: dict, signal: int):
-        """根据当前信号计算止损价格。"""
-        stop_loss = None
-        try:
-            if self.cfg.mode == 'long_short':
-                if signal == 1:
-                    sl = float(st['lower'][-1])
-                    if sl < last_close:
-                        stop_loss = sl
-                elif signal == -1:
-                    su = float(st['upper'][-1])
-                    if su > last_close:
-                        stop_loss = su
-            else:
-                if signal == 1:
-                    sl = float(st['lower'][-1])
-                    if sl < last_close:
-                        stop_loss = sl
-        except Exception:
-            pass
-        return stop_loss
+        """根据配置的百分比计算止损价格。"""
+        pct = max(0.0, float(self.cfg.stop_loss_pct))
+        if pct <= 0 or last_close <= 0:
+            return None
+        if self.cfg.mode == 'long_short':
+            if signal == 1:
+                return last_close * (1.0 - pct)
+            elif signal == -1:
+                return last_close * (1.0 + pct)
+        else:
+            if signal == 1:
+                return last_close * (1.0 - pct)
+        return None
 
     def _assess_drawdown(self, equity: float) -> str | None:
         """更新日内与总体回撤状态，返回 kill 状态。"""
