@@ -105,24 +105,6 @@ class OrderExecutor:
             self.logger.error(f"挂止损失败: {e}")
             return {'status': 'error', 'reason': str(e)}
 
-    def place_take_profit(self, side: str, amount: int, trigger_price: float, pos_side: str | None):
-        """在交易所挂出止盈市价单。"""
-        amt = max(int(round(self.exch.amount_to_precision(amount))), int(self.exch.min_contracts()))
-        ps = pos_side.lower().strip() if pos_side else None
-        try:
-            order = self.exch.create_take_profit_order(
-                side=side.lower().strip(),
-                amount=amt,
-                trigger_price=trigger_price,
-                pos_side=ps,
-            )
-            order_id = order.get('id', '')
-            self.logger.info(f"【OKX合约】挂止盈成功 id={order_id} trigger={trigger_price:.6f}")
-            return {'status': 'ok', 'order_id': order_id}
-        except Exception as e:
-            self.logger.error(f"挂止盈失败: {e}")
-            return {'status': 'error', 'reason': str(e)}
-
     def cancel_all_conditional(self):
         """取消所有条件单。"""
         return self.exch.cancel_all_conditional_orders()

@@ -130,32 +130,6 @@ class ExchangeClient:
             params=params,
         )
 
-    def create_take_profit_order(
-        self,
-        side: str,
-        amount: int,
-        trigger_price: float,
-        pos_side: str | None,
-    ):
-        """挂出止盈市价单。"""
-        params: dict = {
-            'tdMode': self.cfg.margin_mode,
-            'reduceOnly': True,
-            'tpTriggerPx': float(self.price_to_precision(trigger_price)),
-            'tpTriggerPxType': 'last',
-            'tpOrdPx': '-1',  # -1 代表市价执行
-        }
-        if self.cfg.position_mode.lower() == 'hedge' and pos_side in ('long', 'short'):
-            params['posSide'] = pos_side
-        return self.exchange.create_order(
-            symbol=self.cfg.symbol,
-            type='conditional',
-            side=side,
-            amount=amount,
-            price=None,
-            params=params,
-        )
-
     def cancel_all_conditional_orders(self):
         """取消当前合约所有条件单（止损/止盈）。"""
         try:

@@ -32,29 +32,26 @@ class StrategyRunner:
         self._global_kill = False
 
     def _risk_levels(self, last_close: float, st: dict, signal: int):
-        """根据当前信号计算止损/止盈价格。"""
-        stop_loss = take_profit = None
+        """根据当前信号计算止损价格。"""
+        stop_loss = None
         try:
             if self.cfg.mode == 'long_short':
                 if signal == 1:
                     sl = float(st['lower'][-1])
                     if sl < last_close:
-                        tp = last_close + self.cfg.rr * (last_close - sl)
-                        stop_loss, take_profit = sl, tp
+                        stop_loss = sl
                 elif signal == -1:
                     su = float(st['upper'][-1])
                     if su > last_close:
-                        tp = last_close - self.cfg.rr * (su - last_close)
-                        stop_loss, take_profit = su, tp
+                        stop_loss = su
             else:
                 if signal == 1:
                     sl = float(st['lower'][-1])
                     if sl < last_close:
-                        tp = last_close + self.cfg.rr * (last_close - sl)
-                        stop_loss, take_profit = sl, tp
+                        stop_loss = sl
         except Exception:
             pass
-        return stop_loss, take_profit
+        return stop_loss
 
     def _assess_drawdown(self, equity: float) -> str | None:
         """更新日内与总体回撤状态，返回 kill 状态。"""
@@ -168,7 +165,7 @@ class StrategyRunner:
             self._flatten_positions(long_amt, short_amt, last_close)
             return
 
-        stop_loss, take_profit = self._risk_levels(last_close, st, current_signal)
+        stop_loss = self._risk_levels(last_close, st, current_signal)
         target_contracts = self._compute_position_size(current_signal, last_close, stop_loss, equity)
 
         desired_long = desired_short = 0
@@ -222,13 +219,9 @@ class StrategyRunner:
         if current_long > 0 and stop_loss is not None:
             hedge_ps = 'long' if self.cfg.position_mode.lower() == 'hedge' else None
             self.exec.place_stop('sell', current_long, stop_loss, hedge_ps)
-            if take_profit is not None:
-                self.exec.place_take_profit('sell', current_long, take_profit, hedge_ps)
         elif current_short > 0 and stop_loss is not None:
             hedge_ps = 'short' if self.cfg.position_mode.lower() == 'hedge' else None
             self.exec.place_stop('buy', current_short, stop_loss, hedge_ps)
-            if take_profit is not None:
-                self.exec.place_take_profit('buy', current_short, take_profit, hedge_ps)
 
         action_str = '|'.join(actions) if actions else None
         exec_price = prices[-1] if prices else None
@@ -246,7 +239,7 @@ class StrategyRunner:
             'fee': fee,
             'order_id': order_id,
             'stop_loss': stop_loss,
-            'take_profit': take_profit,
+            'take_profit': None,
             'best_factor': best_factor,
             'equity': equity,
             'mode': mode_str
