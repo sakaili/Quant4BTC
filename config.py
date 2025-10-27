@@ -21,6 +21,7 @@ class Config:
     # 运行环境：仅保留沙盒/实盘
     use_demo: bool = os.getenv('USE_DEMO', 'true').lower() in TRUE_SET
     log_level: str = os.getenv('LOG_LEVEL', 'INFO')
+    strategy_name: str = os.getenv('STRATEGY_NAME', 'supertrend')
 
     # 代理
     http_proxy: str = os.getenv('HTTP_PROXY', '')

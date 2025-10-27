@@ -6,18 +6,20 @@
 
 | 模块 | 职责摘要 |
 | --- | --- |
-| config.py | 统一从环境变量加载运行参数，并提供日志初始化。 |
-| exchange_client.py | 对 ccxt.okx 做最薄封装，负责连接、精度、杠杆与仓位模式。 |
-| data.py | 拉取 K 线数据并整理成 pandas.DataFrame，剔除未收盘的尾巴。 |
-| indicators.py | 计算 ATR 与 SuperTrend 指标。 |
-| signals.py | 基于 SuperTrend 输出构造 long/short/flat 信号序列。 |
-| evaluator.py | 评估不同因子的绩效，输出多项指标并打分。 |
-| selector.py | 根据配置选择因子（遍历、绩效聚类或 regime 聚类）。 |
-| position_reader.py | 屏蔽 OKX 多仓位模式差异，返回净仓及明细。 |
-| order_executor.py | 统一封装下单与平仓语义，同时记录手续费等信息。 |
-| csv_logger.py | 将每次执行结果追加到 CSV。 |
-| unner.py | 主控流程：拉取数据、评估、执行、记录。 |
-| main.py | 入口脚本，完成初始化并启动主循环。 |
+| config.py | 统一化配置入口，读取环境变量并初始化日志 |
+| exchange_client.py | 对 ccxt.okx 的轻量封装，处理账户、杠杆与持仓模式 |
+| data.py | 抓取 K 线并整理为 pandas.DataFrame，移除未完成 K 线 |
+| indicators.py | 计算 ATR 和 SuperTrend 指标 |
+| signals.py | 基于 SuperTrend 生成 long/short/flat 信号 |
+| evaluator.py | 评估不同参数表现并输出统计 |
+| selector.py | 策略特有的因子选择逻辑（如 regime 聚类） |
+| position_reader.py | 读取 OKX 持仓信息，返回净仓/对冲仓数据 |
+| order_executor.py | 封装开平仓及风险控制下单 |
+| csv_logger.py | 将每次执行结果追加写入 CSV |
+| strategies/base.py | 策略基类，封装循环调度与风险管理 |
+| strategies/supertrend.py | SuperTrend 策略实现，继承策略基类 |
+| runner.py | 兼容旧接口，继续导出 SuperTrendStrategy |
+| main.py | 程序入口，装配通用组件并运行所选策略 |
 
 ### 主循环概览
 1. DataFetcher 拉取行情，清理未收盘数据。  
@@ -25,7 +27,7 @@
 3. FactorSelector 决定当前使用的 SuperTrend 因子。  
 4. SignalBuilder 生成目标仓位，PositionReader 读取当前仓位。  
 5. OrderExecutor 触发必要的开平仓动作，并同步写入 CsvLogger。  
-6. StrategyRunner.align_and_loop 通过对齐函数约束轮询节奏。
+6. Strategy.align_and_loop 通过对齐回调驱动主循环。
 
 ## 环境准备
 
@@ -44,6 +46,7 @@ umpy）
 | CONTRACTS_PER_ORDER | 10 | 单次下单张数 |
 | USE_DEMO | 	rue | 是否使用沙盒环境 |
 | LOG_LEVEL | INFO | 日志等级 |
+| STRATEGY_NAME | supertrend | 选择策略实现（supertrend 等） |
 | OKX_API_KEY/SECRET/PASSWORD | 空 | OKX API 凭证 |
 | LEVERAGE | 5 | 杠杆倍数 |
 | MARGIN_MODE | cross | cross 或 isolated |

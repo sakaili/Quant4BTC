@@ -5,10 +5,22 @@ import threading
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+
 from config import Config, setup_logging
-from exchange_client import ExchangeClient
-from runner import StrategyRunner
+from csv_logger import CsvLogger
 from data import DataFetcher
+from exchange_client import ExchangeClient
+from indicators import IndicatorEngine
+from order_executor import OrderExecutor
+from position_reader import PositionReader
+from selector import FactorSelector
+from signals import SignalBuilder
+from strategies.supertrend import SuperTrendStrategy
+
+
+STRATEGY_REGISTRY = {
+    "supertrend": SuperTrendStrategy,
+}
 
 
 def shutdown_handler(signum, frame):
@@ -32,13 +44,34 @@ def main():
             return str(path.with_name(f"{path.stem}_{symbol_tag}{path.suffix}"))
         return str(path.parent / f"{path.name}_{symbol_tag}.csv")
 
+    strategy_cls = STRATEGY_REGISTRY.get(base_cfg.strategy_name.lower())
+    if strategy_cls is None:
+        raise ValueError(f"未知策略 '{base_cfg.strategy_name}'，请检查 STRATEGY_NAME 环境变量")
+
     def run_for_symbol(symbol: str):
         symbol_tag = safe_symbol(symbol)
         symbol_logger = base_logger.getChild(symbol_tag)
         csv_path = resolve_csv_path(base_cfg.csv_log_file, symbol_tag)
         symbol_cfg = replace(base_cfg, symbol=symbol, csv_log_file=csv_path)
         exch = ExchangeClient(symbol_cfg, symbol_logger)
-        runner = StrategyRunner(symbol_cfg, exch, symbol_logger)
+        data_fetcher = DataFetcher(symbol_cfg, exch, symbol_logger)
+        indicator_engine = IndicatorEngine(symbol_cfg)
+        signal_builder = SignalBuilder(symbol_cfg)
+        factor_selector = FactorSelector(symbol_cfg)
+        order_executor = OrderExecutor(symbol_cfg, exch, symbol_logger)
+        csv_logger = CsvLogger(csv_path, symbol_logger)
+        position_reader = PositionReader(symbol_cfg, exch)
+        strategy = strategy_cls(
+            cfg=symbol_cfg,
+            logger=symbol_logger,
+            data_fetcher=data_fetcher,
+            indicator_engine=indicator_engine,
+            signal_builder=signal_builder,
+            factor_selector=factor_selector,
+            order_executor=order_executor,
+            position_reader=position_reader,
+            csv_logger=csv_logger,
+        )
 
         def align_to_next_candle():
             tf_sec = DataFetcher.timeframe_seconds(symbol_cfg.timeframe)
@@ -49,7 +82,7 @@ def main():
             symbol_logger.info(f"[{symbol}] 等待 {sleep_secs:.2f}s 对齐下一根 {symbol_cfg.timeframe} K 线")
             time.sleep(sleep_secs)
 
-        runner.align_and_loop(align_to_next_candle)
+        strategy.align_and_loop(align_to_next_candle)
 
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
