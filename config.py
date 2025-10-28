@@ -21,7 +21,7 @@ class Config:
     # 运行环境：仅保留沙盒/实盘
     use_demo: bool = os.getenv('USE_DEMO', 'true').lower() in TRUE_SET
     log_level: str = os.getenv('LOG_LEVEL', 'INFO')
-    strategy_name: str = os.getenv('STRATEGY_NAME', 'supertrend')
+    strategy_name: str = os.getenv('STRATEGY_NAME', 'macd_triple_filter') #macd_triple_filter supertrend
 
     # 代理
     http_proxy: str = os.getenv('HTTP_PROXY', '')
@@ -48,6 +48,15 @@ class Config:
     max_mult: float = float(os.getenv('MAX_MULT', '5.0'))
     step: float = float(os.getenv('STEP', '0.5'))
     selection: str = os.getenv('SELECTION', 'regime_kmeans')
+
+    macd_fast_length: int = int(os.getenv('MACD_FAST_LENGTH', '12'))
+    macd_slow_length: int = int(os.getenv('MACD_SLOW_LENGTH', '26'))
+    macd_signal_length: int = int(os.getenv('MACD_SIGNAL_LENGTH', '9'))
+    macd_regime_ma_length: int = int(os.getenv('MACD_REGIME_MA_LENGTH', '200'))
+    macd_hist_confirm_bars: int = int(os.getenv('MACD_HIST_CONFIRM_BARS', '2'))
+    macd_atr_min: float = float(os.getenv('MACD_ATR_MIN', '0.0008'))
+    macd_atr_max: float = float(os.getenv('MACD_ATR_MAX', '0.02'))
+    macd_atr_stop_multiple: float = float(os.getenv('MACD_ATR_STOP_MULTIPLE', '2.0'))
 
     # 策略模式
     mode: str = os.getenv('MODE', 'long_short')  # long_flat / long_short

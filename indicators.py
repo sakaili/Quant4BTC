@@ -1,6 +1,7 @@
 ﻿# indicators.py
 import numpy as np
 import pandas as pd
+from typing import Optional
 from config import Config
 
 
@@ -25,6 +26,39 @@ class IndicatorEngine:
         n = max(2, int(self.cfg.atr_length))
         df['atr'] = tr.ewm(alpha=1 / n, adjust=False).mean()
         return df.dropna(subset=['atr', 'hl2', 'Close'])
+
+    def compute_ema(self, series: pd.Series, length: int) -> pd.Series:
+        """����ָ���ȡ� EMA ϵ�С�"""
+        span = max(1, int(length))
+        return series.ewm(span=span, adjust=False).mean()
+
+    def compute_macd(
+        self,
+        df: pd.DataFrame,
+        fast_length: Optional[int] = None,
+        slow_length: Optional[int] = None,
+        signal_length: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """���� MACD �� DIF/DEA/Histogram ��"""
+        if df.empty:
+            return df.copy()
+
+        close = df['Close']
+        fast = max(1, int(fast_length if fast_length is not None else self.cfg.macd_fast_length))
+        slow = max(1, int(slow_length if slow_length is not None else self.cfg.macd_slow_length))
+        signal = max(1, int(signal_length if signal_length is not None else self.cfg.macd_signal_length))
+
+        ema_fast = self.compute_ema(close, fast)
+        ema_slow = self.compute_ema(close, slow)
+        dif = ema_fast - ema_slow
+        dea = self.compute_ema(dif, signal)
+        hist = dif - dea
+
+        macd_df = df.copy()
+        macd_df['DIF'] = dif
+        macd_df['DEA'] = dea
+        macd_df['Histogram'] = hist
+        return macd_df
 
     def compute_supertrend(self, df_atr: pd.DataFrame, factor: float) -> dict:
         """基于 ATR 平台生成 SuperTrend 上下轨、趋势状态等结果。"""

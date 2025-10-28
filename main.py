@@ -15,11 +15,14 @@ from order_executor import OrderExecutor
 from position_reader import PositionReader
 from selector import FactorSelector
 from signals import SignalBuilder
+from strategies.macd_triple_filter import TripleFilterMACDStrategy
 from strategies.supertrend import SuperTrendStrategy
 
 
 STRATEGY_REGISTRY = {
     "supertrend": SuperTrendStrategy,
+    "macd_triple_filter": TripleFilterMACDStrategy,
+    "triple_macd": TripleFilterMACDStrategy,
 }
 
 
