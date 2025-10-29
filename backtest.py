@@ -113,6 +113,150 @@ class _ProgressPrinter:
             sys.stdout.flush()
 
 
+def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -> dict[str, np.ndarray | float]:
+    close_arr = np.asarray(close, dtype=float)
+    signal_arr = np.asarray(signal, dtype=float)
+    if close_arr.shape != signal_arr.shape:
+        raise ValueError("Price and signal length mismatch")
+    signal_arr = signal_arr.astype(int)
+    qty = float(getattr(cfg, "backtest_trade_size", 0.01))
+    qty = max(0.0, qty)
+    fee_rate = max(0.0, float(getattr(cfg, "fee_rate", 0.0)))
+    slippage = max(0.0, float(getattr(cfg, "slippage_rate", 0.0)))
+    turnover_penalty = max(0.0, float(getattr(cfg, "turnover_penalty", 0.0)))
+    initial_capital = float(getattr(cfg, "initial_capital", 0.0))
+
+    cash = initial_capital
+    position_units = 0.0
+    equity_list: list[float] = []
+    cash_list: list[float] = []
+    position_units_list: list[float] = []
+    pnl_list: list[float] = []
+    return_list: list[float] = []
+    delta_list: list[float] = []
+    cost_list: list[float] = []
+    fee_list: list[float] = []
+    penalty_list: list[float] = []
+    notional_list: list[float] = []
+    trade_pnl_list: list[float] = []
+    exec_price_list: list[float] = []
+
+    prev_equity = initial_capital
+    eps = 1e-12
+
+    for price, target_signal in zip(close_arr, signal_arr):
+        price_f = float(price)
+        target_units = float(target_signal) * qty
+        delta = target_units - position_units
+        if abs(delta) <= eps:
+            delta = 0.0
+
+        equity_before_trade = cash + position_units * price_f
+        fee = 0.0
+        penalty_cost = 0.0
+        exec_price = float("nan")
+        trade_pnl = 0.0
+        if delta != 0.0:
+            exec_price = price_f * (1.0 + slippage) if delta > 0 else price_f * (1.0 - slippage)
+            cash -= delta * exec_price
+            fee = abs(delta) * exec_price * fee_rate
+            cash -= fee
+            if turnover_penalty > 0.0 and qty > 0.0:
+                penalty_cost = turnover_penalty * (abs(delta) / (qty + eps))
+                cash -= penalty_cost
+            position_units = target_units
+            trade_pnl = (cash + position_units * price_f) - equity_before_trade
+        else:
+            position_units = target_units
+
+        trade_cost = fee + penalty_cost
+        delta_list.append(delta)
+        cost_list.append(trade_cost)
+        fee_list.append(fee)
+        penalty_list.append(penalty_cost)
+        exec_price_list.append(exec_price)
+
+        notional = position_units * price_f
+        notional_list.append(notional)
+        equity = cash + notional
+        pnl = equity - prev_equity
+        ret = pnl / (prev_equity + eps)
+
+        equity_list.append(equity)
+        pnl_list.append(pnl)
+        return_list.append(ret)
+        cash_list.append(cash)
+        position_units_list.append(position_units)
+        trade_pnl_list.append(trade_pnl)
+
+        prev_equity = equity
+
+    delta_arr = np.asarray(delta_list, dtype=float)
+    turns = float(np.sum(np.abs(delta_arr)) / qty) if qty > 0.0 else 0.0
+
+    return {
+        "equity": np.asarray(equity_list, dtype=float),
+        "cash": np.asarray(cash_list, dtype=float),
+        "pnl": np.asarray(pnl_list, dtype=float),
+        "returns": np.asarray(return_list, dtype=float),
+        "position_units": np.asarray(position_units_list, dtype=float),
+        "notional": np.asarray(notional_list, dtype=float),
+        "trade_delta": delta_arr,
+        "trade_cost": np.asarray(cost_list, dtype=float),
+        "trade_fee": np.asarray(fee_list, dtype=float),
+        "trade_penalty": np.asarray(penalty_list, dtype=float),
+        "trade_exec_price": np.asarray(exec_price_list, dtype=float),
+        "trade_pnl": np.asarray(trade_pnl_list, dtype=float),
+        "turns": turns,
+    }
+
+
+def _evaluate_event_metrics(state: dict[str, np.ndarray | float], cfg: Config) -> dict[str, float]:
+    ret = np.asarray(state.get("returns", []), dtype=float)
+    ret = np.nan_to_num(ret, nan=0.0, posinf=0.0, neginf=0.0)
+    equity = np.asarray(state.get("equity", []), dtype=float)
+    initial_capital = float(getattr(cfg, "initial_capital", 0.0))
+
+    eq_norm: np.ndarray
+    if equity.size > 0 and initial_capital > 0:
+        eq_norm = equity / initial_capital
+    elif ret.size > 0:
+        eq_norm = np.cumprod(1.0 + ret)
+    else:
+        eq_norm = np.array([], dtype=float)
+
+    if eq_norm.size == 0:
+        mdd = 0.0
+        last_eq = 1.0
+    else:
+        peak = np.maximum.accumulate(eq_norm)
+        drawdown = (peak - eq_norm) / (peak + 1e-12)
+        mdd = float(drawdown.max())
+        last_eq = float(eq_norm[-1])
+
+    ann = 252.0
+    sharpe = float((np.mean(ret) * ann) / (np.std(ret) * np.sqrt(ann) + 1e-12)) if ret.size > 0 else 0.0
+    if eq_norm.size == 0:
+        cagr = 0.0
+    elif last_eq <= 0:
+        cagr = -1.0
+    else:
+        cagr = float(last_eq ** (ann / max(len(eq_norm), 1)) - 1.0)
+
+    sortino = Evaluator._sortino(ret, ann=np.sqrt(ann)) if ret.size > 0 else 0.0
+    calmar = (cagr / (mdd + 1e-12)) if mdd > 0 else cagr
+    turns = float(state.get("turns", 0.0) or 0.0)
+    return {
+        "cagr": cagr,
+        "sharpe": sharpe,
+        "mdd": mdd,
+        "last_eq": last_eq,
+        "turns": turns,
+        "sortino": sortino,
+        "calmar": calmar,
+    }
+
+
 def _simulate_supertrend(
     resampled: pd.DataFrame,
     cfg: Config,
@@ -151,14 +295,7 @@ def _simulate_supertrend(
 
     pos_arr = np.asarray(positions, dtype=float)
     close_arr = df_atr["Close"].to_numpy(dtype=float)
-    pnl = evaluator._apply_cost_on_pnl(  # noqa: SLF001
-        pos_arr,
-        close_arr,
-        cfg.fee_rate,
-        cfg.slippage_rate,
-        cfg.turnover_penalty,
-    )
-    equity = np.cumprod(1.0 + pnl) * cfg.initial_capital
+    backtest_state = _event_driven_backtest(close_arr, pos_arr.astype(int), cfg)
 
     timeseries = df_atr.copy()
     timeseries["signal"] = np.asarray(signals, dtype=int)
@@ -167,32 +304,49 @@ def _simulate_supertrend(
     timeseries["supertrend_upper"] = np.asarray(st_upper, dtype=float)
     timeseries["supertrend_lower"] = np.asarray(st_lower, dtype=float)
     timeseries["factor"] = np.asarray(factors, dtype=float)
-    timeseries["equity"] = equity
+    timeseries["equity"] = backtest_state["equity"]
+    timeseries["cash"] = backtest_state["cash"]
+    timeseries["pnl"] = backtest_state["pnl"]
+    timeseries["return"] = backtest_state["returns"]
+    timeseries["position_units"] = backtest_state["position_units"]
+    timeseries["notional"] = backtest_state["notional"]
+    timeseries["trade_delta"] = backtest_state["trade_delta"]
+    timeseries["trade_cost"] = backtest_state["trade_cost"]
+    timeseries["trade_fee"] = backtest_state["trade_fee"]
+    timeseries["trade_penalty"] = backtest_state["trade_penalty"]
+    timeseries["trade_exec_price"] = backtest_state["trade_exec_price"]
+    timeseries["trade_pnl"] = backtest_state["trade_pnl"]
     timeseries.index.name = "timestamp"
     timeseries = timeseries.reset_index()
     progress.finish()
 
-    metrics = evaluator.evaluate_positions(close_arr, pos_arr)
+    metrics = _evaluate_event_metrics(backtest_state, cfg)
     score = evaluator.score(metrics)
     last_factor = factors[-1] if factors else None
     return timeseries, last_factor, metrics, score
 
 
-def _build_macd_timeseries(df_macd: pd.DataFrame, evaluator: Evaluator, cfg: Config) -> pd.DataFrame:
+def _build_macd_timeseries(df_macd: pd.DataFrame, cfg: Config) -> tuple[pd.DataFrame, dict[str, np.ndarray | float]]:
     df = df_macd.copy()
     df["signal"] = df["signal"].astype(int)
-    df["position"] = df["position"].astype(float)
-    pnl = evaluator._apply_cost_on_pnl(  # noqa: SLF001
-        df["position"].to_numpy(),
-        df["Close"].to_numpy(),
-        cfg.fee_rate,
-        cfg.slippage_rate,
-        cfg.turnover_penalty,
-    )
-    equity = np.cumprod(1.0 + pnl) * cfg.initial_capital
-    df["equity"] = equity
+    signal_arr = df["signal"].to_numpy(dtype=int)
+    close_arr = df["Close"].to_numpy(dtype=float)
+    backtest_state = _event_driven_backtest(close_arr, signal_arr, cfg)
+    df["position"] = signal_arr.astype(float)
+    df["position_units"] = backtest_state["position_units"]
+    df["notional"] = backtest_state["notional"]
+    df["cash"] = backtest_state["cash"]
+    df["equity"] = backtest_state["equity"]
+    df["pnl"] = backtest_state["pnl"]
+    df["return"] = backtest_state["returns"]
+    df["trade_delta"] = backtest_state["trade_delta"]
+    df["trade_cost"] = backtest_state["trade_cost"]
+    df["trade_fee"] = backtest_state["trade_fee"]
+    df["trade_penalty"] = backtest_state["trade_penalty"]
+    df["trade_exec_price"] = backtest_state["trade_exec_price"]
+    df["trade_pnl"] = backtest_state["trade_pnl"]
     df.index.name = "timestamp"
-    return df.reset_index()
+    return df.reset_index(), backtest_state
 
 
 def _simulate_macd(
@@ -205,40 +359,42 @@ def _simulate_macd(
     if macd_ts.empty:
         raise ValueError("Not enough data to compute MACD triple filter signals")
 
-    macd_ts = _build_macd_timeseries(macd_ts, evaluator, cfg)
-    positions = macd_ts["position"].to_numpy(dtype=float)
-    closes = macd_ts["Close"].to_numpy(dtype=float)
+    macd_ts, backtest_state = _build_macd_timeseries(macd_ts, cfg)
     progress = _ProgressPrinter(len(macd_ts), "MACD backtest")
     for idx in range(len(macd_ts)):
         progress.update(idx + 1)
     progress.finish()
 
-    metrics = evaluator.evaluate_positions(closes, positions)
+    metrics = _evaluate_event_metrics(backtest_state, cfg)
     score = evaluator.score(metrics)
     return macd_ts, metrics, score
 
 
 def _extract_trades(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return pd.DataFrame(columns=["timestamp", "price", "action"])
-    sig = df["signal"].to_numpy()
-    closes = df["Close"].to_numpy()
-    timestamps = pd.to_datetime(df["timestamp"])
-    trades = []
-    for i in range(1, len(sig)):
-        prev_sig = sig[i - 1]
-        curr_sig = sig[i]
-        if curr_sig == prev_sig:
-            continue
-        action = "buy" if curr_sig > prev_sig else "sell"
-        trades.append(
-            {
-                "timestamp": timestamps.iloc[i] if hasattr(timestamps, "iloc") else timestamps[i],
-                "price": float(closes[i]),
-                "action": action,
-            }
-        )
-    return pd.DataFrame(trades)
+        return pd.DataFrame(columns=["timestamp", "price", "action", "quantity", "pnl"])
+    if "trade_delta" not in df or "trade_pnl" not in df:
+        raise ValueError("timeseries missing trade attribution columns")
+    trade_delta = df["trade_delta"].to_numpy(dtype=float)
+    mask = np.abs(trade_delta) > 1e-12
+    if not mask.any():
+        return pd.DataFrame(columns=["timestamp", "price", "action", "quantity", "pnl"])
+    timestamps = pd.to_datetime(df.loc[mask, "timestamp"])
+    exec_price = df.loc[mask, "trade_exec_price"].to_numpy(dtype=float)
+    close_price = df.loc[mask, "Close"].to_numpy(dtype=float)
+    price = np.where(np.isfinite(exec_price), exec_price, close_price)
+    pnl = df.loc[mask, "trade_pnl"].to_numpy(dtype=float)
+    quantity = np.abs(trade_delta[mask])
+    actions = np.where(trade_delta[mask] > 0, "buy", "sell")
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "price": price,
+            "action": actions,
+            "quantity": quantity,
+            "pnl": pnl,
+        }
+    )
 
 
 def _plot_artifacts(timeseries: pd.DataFrame, trades: pd.DataFrame, strategy: str, out_path: Path):

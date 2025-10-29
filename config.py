@@ -63,8 +63,8 @@ class Config:
     rr: float = float(os.getenv('RR', '2.0'))
 
     # 成本估算（仅用于评估）
-    slippage_rate: float = float(os.getenv('SLIPPAGE_RATE', '0.0005'))
-    fee_rate: float = float(os.getenv('FEE_RATE', '0.001'))
+    slippage_rate: float = float(os.getenv('SLIPPAGE_RATE', '0.0001'))
+    fee_rate: float = float(os.getenv('FEE_RATE', '0.0005'))
     turnover_penalty: float = float(os.getenv('TURNOVER_PENALTY', '0.0'))
 
     # 日志
@@ -88,6 +88,8 @@ class Config:
     zscore_window: int = int(os.getenv('ZSCORE_WINDOW', '500'))
     min_regime_samples: int = int(os.getenv('MIN_REGIME_SAMPLES', '50'))
     min_cluster_frac: float = float(os.getenv('MIN_CLUSTER_FRAC', '0.05'))
+
+    backtest_trade_size: float = float(os.getenv('BACKTEST_TRADE_SIZE', '0.01'))
 
     def proxies(self):
         """根据配置拼接代理设置，未配置时返回 None。"""
