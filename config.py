@@ -38,12 +38,12 @@ class Config:
     position_mode: str = os.getenv('POSITION_MODE', 'hedge')  # net/hedge
 
     # 指标/选参
-    metric_lookback: int = int(os.getenv('METRIC_LOOKBACK', '300'))
-    regime_lookback: int = int(os.getenv('REGIME_LOOKBACK', '600'))
+    metric_lookback: int = int(os.getenv('METRIC_LOOKBACK', '100'))
+    regime_lookback: int = int(os.getenv('REGIME_LOOKBACK', '200'))
     feature_ema: int = int(os.getenv('FEATURE_EMA', '20'))
     n_clusters: int = int(os.getenv('N_CLUSTERS', '3'))
 
-    atr_length: int = int(os.getenv('ATR_LENGTH', '10'))
+    atr_length: int = int(os.getenv('ATR_LENGTH', '5'))
     min_mult: float = float(os.getenv('MIN_MULT', '1.0'))
     max_mult: float = float(os.getenv('MAX_MULT', '5.0'))
     step: float = float(os.getenv('STEP', '0.5'))
@@ -73,16 +73,16 @@ class Config:
 
     # 风险管理
     initial_capital: float = float(os.getenv('INITIAL_CAPITAL', '500'))
-    risk_per_trade: float = float(os.getenv('RISK_PER_TRADE', '0.05'))
+    risk_per_trade: float = float(os.getenv('RISK_PER_TRADE', '0.1'))
     daily_drawdown_limit: float = float(os.getenv('DAILY_DRAWDOWN_LIMIT', '0.10'))
     overall_drawdown_limit: float = float(os.getenv('OVERALL_DRAWDOWN_LIMIT', '0.30'))
-    stop_loss_pct: float = float(os.getenv('STOP_LOSS_PCT', '0.05'))
+    stop_loss_pct: float = float(os.getenv('STOP_LOSS_PCT', '0.5'))
 
     # 信号质量控制
-    signal_confirm: int = int(os.getenv('SIGNAL_CONFIRM', '2'))
-    band_eps: float = float(os.getenv('BAND_EPS', '0.0005'))
-    factor_hold_bars: int = int(os.getenv('FACTOR_HOLD_BARS', '10'))
-    factor_sticky: float = float(os.getenv('FACTOR_STICKY', '0.25'))
+    signal_confirm: int = int(os.getenv('SIGNAL_CONFIRM', '3'))
+    band_eps: float = float(os.getenv('BAND_EPS', '0.001'))
+    factor_hold_bars: int = int(os.getenv('FACTOR_HOLD_BARS', '20'))
+    factor_sticky: float = float(os.getenv('FACTOR_STICKY', '0.5'))
 
     # 聚类/标准化
     zscore_window: int = int(os.getenv('ZSCORE_WINDOW', '500'))

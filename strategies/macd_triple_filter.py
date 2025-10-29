@@ -158,6 +158,26 @@ class TripleFilterMACDStrategy(Strategy):
         super().__init__(cfg, logger, order_executor, position_reader, csv_logger)
         self.fetcher = data_fetcher
         self.ind = indicator_engine
+        self._long_entry_price: float | None = None
+        self._long_stop_loss: float | None = None
+        self._long_take_profit: float | None = None
+        self._long_qty: int = 0
+        self._short_entry_price: float | None = None
+        self._short_stop_loss: float | None = None
+        self._short_take_profit: float | None = None
+        self._short_qty: int = 0
+
+    def _clear_long_state(self) -> None:
+        self._long_entry_price = None
+        self._long_stop_loss = None
+        self._long_take_profit = None
+        self._long_qty = 0
+
+    def _clear_short_state(self) -> None:
+        self._short_entry_price = None
+        self._short_stop_loss = None
+        self._short_take_profit = None
+        self._short_qty = 0
 
     def _compute_position_size(
         self,
@@ -244,6 +264,8 @@ class TripleFilterMACDStrategy(Strategy):
             }[drawdown_state]
             self.logger.error(msg)
             self._flatten_positions(long_amt, short_amt, last_close)
+            self._clear_long_state()
+            self._clear_short_state()
             return
 
         target_contracts = self._compute_position_size(target_signal, last_close, stop_loss, equity)
@@ -284,24 +306,120 @@ class TripleFilterMACDStrategy(Strategy):
         current_long = max(0, long_amt - reduce_long)
         current_short = max(0, short_amt - reduce_short)
 
+        if current_long == 0:
+            self._clear_long_state()
+        if current_short == 0:
+            self._clear_short_state()
+
         add_long = max(0, desired_long - current_long)
         if add_long > 0:
+            base_long_qty = current_long
             resp = self.exec.open_long(add_long, last_close)
             record(resp, f"open_long_{add_long}")
             current_long += add_long
+            fill_price: float | None = None
+            if resp and resp.get("status") == "ok" and resp.get("price") is not None:
+                try:
+                    fill_price = float(resp["price"])
+                except (TypeError, ValueError):
+                    fill_price = None
+            if fill_price is None:
+                fill_price = last_close
+            if current_long > 0:
+                if base_long_qty <= 0 or self._long_entry_price is None:
+                    self._long_entry_price = fill_price
+                else:
+                    self._long_entry_price = (
+                        self._long_entry_price * base_long_qty + fill_price * add_long
+                    ) / (base_long_qty + add_long)
+            self._long_qty = current_long
+        else:
+            self._long_qty = current_long
+
         add_short = max(0, desired_short - current_short)
         if add_short > 0:
+            base_short_qty = current_short
             resp = self.exec.open_short(add_short, last_close)
             record(resp, f"open_short_{add_short}")
             current_short += add_short
+            fill_price: float | None = None
+            if resp and resp.get("status") == "ok" and resp.get("price") is not None:
+                try:
+                    fill_price = float(resp["price"])
+                except (TypeError, ValueError):
+                    fill_price = None
+            if fill_price is None:
+                fill_price = last_close
+            if current_short > 0:
+                if base_short_qty <= 0 or self._short_entry_price is None:
+                    self._short_entry_price = fill_price
+                else:
+                    self._short_entry_price = (
+                        self._short_entry_price * base_short_qty + fill_price * add_short
+                    ) / (base_short_qty + add_short)
+            self._short_qty = current_short
+        else:
+            self._short_qty = current_short
 
         self.exec.cancel_all_conditional()
-        if current_long > 0 and stop_loss is not None:
+
+        rr = max(0.0, float(getattr(self.cfg, "rr", 0.0)))
+        long_tp = None
+        short_tp = None
+
+        if current_long > 0:
+            if stop_loss is not None and target_signal == 1:
+                self._long_stop_loss = stop_loss
+            entry_price = self._long_entry_price
+            stop_price = self._long_stop_loss
+            if rr > 0 and entry_price is not None and stop_price is not None:
+                risk = entry_price - stop_price
+                if risk > 0:
+                    long_tp = entry_price + rr * risk
+            self._long_take_profit = long_tp
+            self._long_qty = current_long
+        else:
+            self._clear_long_state()
+
+        if current_short > 0:
+            if stop_loss is not None and target_signal == -1:
+                self._short_stop_loss = stop_loss
+            entry_price = self._short_entry_price
+            stop_price = self._short_stop_loss
+            if rr > 0 and entry_price is not None and stop_price is not None:
+                risk = stop_price - entry_price
+                if risk > 0:
+                    short_tp = entry_price - rr * risk
+            self._short_take_profit = short_tp
+            self._short_qty = current_short
+        else:
+            self._clear_short_state()
+
+        if current_long > 0 and long_tp is not None and last_close >= long_tp:
+            resp = self.exec.close_long(current_long, last_close)
+            record(resp, f"take_profit_long_{current_long}")
+            current_long = 0
+            self._clear_long_state()
+            self.exec.cancel_all_conditional()
+        elif current_short > 0 and short_tp is not None and last_close <= short_tp:
+            resp = self.exec.close_short(current_short, last_close)
+            record(resp, f"take_profit_short_{current_short}")
+            current_short = 0
+            self._clear_short_state()
+            self.exec.cancel_all_conditional()
+
+        if current_long > 0 and self._long_stop_loss is not None:
             hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-            self.exec.place_stop("sell", current_long, stop_loss, hedge_ps)
-        elif current_short > 0 and stop_loss is not None:
+            self.exec.place_stop("sell", current_long, self._long_stop_loss, hedge_ps)
+        elif current_short > 0 and self._short_stop_loss is not None:
             hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-            self.exec.place_stop("buy", current_short, stop_loss, hedge_ps)
+            self.exec.place_stop("buy", current_short, self._short_stop_loss, hedge_ps)
+
+        stop_loss_value = self._long_stop_loss if self._long_stop_loss is not None else self._short_stop_loss
+        if stop_loss_value is None:
+            stop_loss_value = stop_loss
+
+        take_profit_value = long_tp if long_tp is not None else short_tp
 
         action_str = "|".join(actions) if actions else None
         exec_price = prices[-1] if prices else None
@@ -319,8 +437,8 @@ class TripleFilterMACDStrategy(Strategy):
                 "exec_price": exec_price,
                 "fee": fee,
                 "order_id": order_id,
-                "stop_loss": stop_loss,
-                "take_profit": None,
+                "stop_loss": stop_loss_value,
+                "take_profit": take_profit_value,
                 "best_factor": None,
                 "equity": equity,
                 "mode": mode_str,

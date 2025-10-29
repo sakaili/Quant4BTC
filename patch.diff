@@ -1,0 +1,61 @@
+*** Begin Patch
+*** Update File: strategies/supertrend.py
+@@
+-        st = self.ind.compute_supertrend(df_atr, best_factor)
+-        sig_arr = self.sbuilder.build(df_atr, st)
+-        current_signal = int(sig_arr[-1])
+-        last_close = float(df_atr["Close"].iloc[-1])
++        st = self.ind.compute_supertrend(df_atr, best_factor)
++        sig_arr = self.sbuilder.build(df_atr, st)
++        current_signal = int(sig_arr[-1])
++        last_close = float(df_atr["Close"].iloc[-1])
++
++        macd_df = self.ind.compute_macd(df_atr)
++        macd_valid = macd_df.dropna(subset=["DIF", "DEA"]) if not macd_df.empty else macd_df
++        if len(macd_valid) >= 2:
++            prev_macd = macd_valid.iloc[-2]
++            latest_macd = macd_valid.iloc[-1]
++            prev_dif = float(prev_macd["DIF"])
++            prev_dea = float(prev_macd["DEA"])
++            latest_dif = float(latest_macd["DIF"])
++            latest_dea = float(latest_macd["DEA"])
++            macd_golden_cross = prev_dif <= prev_dea and latest_dif > latest_dea
++            macd_death_cross = prev_dif >= prev_dea and latest_dif < latest_dea
++        else:
++            macd_golden_cross = False
++            macd_death_cross = False
+@@
+-        desired_long = desired_short = 0
+-        if self.cfg.mode == "long_flat":
+-            desired_long = target_contracts if current_signal == 1 else 0
+-        else:
+-            if current_signal == 1:
+-                desired_long = target_contracts
+-            elif current_signal == -1:
+-                desired_short = target_contracts
++        can_go_long = current_signal == 1
++        can_go_short = current_signal == -1 and self.cfg.mode != "long_flat"
++
++        desired_long = long_amt
++        if long_amt > 0:
++            if current_signal == -1 or macd_death_cross:
++                desired_long = 0
++        else:
++            if can_go_long and macd_golden_cross and target_contracts > 0:
++                desired_long = target_contracts
++            else:
++                desired_long = 0
++
++        if self.cfg.mode == "long_flat":
++            desired_short = 0
++        else:
++            desired_short = short_amt
++            if short_amt > 0:
++                if current_signal == 1 or macd_golden_cross:
++                    desired_short = 0
++            else:
++                if can_go_short and macd_death_cross and target_contracts > 0:
++                    desired_short = target_contracts
++                else:
++                    desired_short = 0
+*** End Patch
