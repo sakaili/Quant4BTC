@@ -11,8 +11,8 @@ from config import Config
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Download historical OHLCV data from OKX.")
-    parser.add_argument("--symbol", type=str, help="Trading pair, e.g. BTC/USDT:USDT")
+    parser = argparse.ArgumentParser(description="Download historical OHLCV data from Binance USD-M futures.")
+    parser.add_argument("--symbol", type=str, help="Trading pair, e.g. BTC/USDC")
     parser.add_argument("--timeframe", type=str, default="1m", help="Timeframe, default 1m")
     parser.add_argument("--since", type=str, help="ISO format start time, e.g. 2022-01-01T00:00:00Z")
     parser.add_argument("--until", type=str, help="ISO format end time")
@@ -35,12 +35,11 @@ def main():
     cfg = Config()
     symbol = args.symbol or cfg.symbol
 
-    exchange = ccxt.okx({
-        "apiKey": cfg.okx_api_key,
-        "secret": cfg.okx_secret,
-        "password": cfg.okx_password,
+    exchange = ccxt.binanceusdm({
+        "apiKey": cfg.binance_api_key,
+        "secret": cfg.binance_secret,
         "enableRateLimit": True,
-        "options": {"defaultType": "swap"},
+        "options": {"defaultType": "future", "defaultSubType": "linear", "testnet": bool(cfg.use_demo)},
         "proxies": cfg.proxies(),
         "timeout": 20000,
     })

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from math import floor
 from typing import TYPE_CHECKING
 
 from strategies.base import Strategy
@@ -58,14 +57,19 @@ class SuperTrendStrategy(Strategy):
         last_close: float,
         stop_loss: float | None,
         equity: float,
-    ) -> int:
+    ) -> float:
         if signal == 0:
-            return 0
+            return 0.0
         if self.cfg.mode == "long_flat" and signal < 0:
-            return 0
+            return 0.0
+
+        fixed_size = float(getattr(self.cfg, "fixed_order_size", 0.0))
+        if fixed_size > 0.0:
+            return fixed_size
+
         if stop_loss is None or last_close <= 0 or equity <= 0:
             self.logger.warning("缺乏有效止损价格，放弃交易")
-            return 0
+            return 0.0
 
         market_info = self.exec.market_info()
         available_margin = self.exec.available_margin()
@@ -73,12 +77,12 @@ class SuperTrendStrategy(Strategy):
         stop_distance = last_close - stop_loss if signal > 0 else stop_loss - last_close
         if stop_distance <= 0:
             self.logger.warning("止损距离无效，放弃交易")
-            return 0
+            return 0.0
 
         risk_amount = equity * self.cfg.risk_per_trade
         loss_per_contract = stop_distance * contract_value
         if loss_per_contract <= 0:
-            return 0
+            return 0.0
         contracts_by_risk = risk_amount / loss_per_contract
 
         leverage = max(float(self.cfg.leverage), 1.0)
@@ -88,15 +92,14 @@ class SuperTrendStrategy(Strategy):
 
         contracts_by_margin = available_margin / per_contract_notional if per_contract_notional > 0 else 0.0
 
-        raw_contracts = min(contracts_by_risk, contracts_by_leverage, contracts_by_margin)
-        contracts = floor(max(0.0, raw_contracts))
+        contracts = max(0.0, min(contracts_by_risk, contracts_by_leverage, contracts_by_margin))
 
-        min_contracts = int(max(1, self.exec.exch.min_contracts()))
+        min_contracts = float(max(self.exec.exch.min_contracts(), 0.0))
         if contracts < min_contracts:
-            if min_contracts > 0:
+            if min_contracts > 0.0:
                 self.logger.warning("预估仓位不足，改用最小合约数量下单")
                 return min_contracts
-            return 0
+            return 0.0
         return contracts
 
     def run_once(self) -> None:
@@ -117,7 +120,36 @@ class SuperTrendStrategy(Strategy):
         current_signal = int(sig_arr[-1])
         last_close = float(df_atr["Close"].iloc[-1])
 
-        self.logger.info(f"信号: {current_signal} 倍数: {best_factor:.3f} Close: {last_close:.2f}")
+        if self.cfg.use_macd_filter:
+            macd_df = self.ind.compute_macd(df_atr)
+            macd_df = macd_df.dropna(subset=["DIF", "DEA"])
+            if macd_df.empty:
+                macd_allowed = False
+                dif_val = dea_val = None
+            else:
+                dif_val = float(macd_df["DIF"].iloc[-1])
+                dea_val = float(macd_df["DEA"].iloc[-1])
+                if current_signal > 0:
+                    macd_allowed = dif_val >= dea_val
+                elif current_signal < 0:
+                    macd_allowed = dif_val <= dea_val
+                else:
+                    macd_allowed = True
+            if not macd_allowed:
+                current_signal = 0
+        else:
+            macd_allowed = True
+            dif_val = dea_val = None
+
+        self.logger.info(
+            "信号: %s 倍数: %.3f Close: %.2f MACD过滤:%s DIF:%s DEA:%s",
+            current_signal,
+            best_factor,
+            last_close,
+            "启用" if self.cfg.use_macd_filter else "未启用",
+            f"{dif_val:.6f}" if dif_val is not None else "NA",
+            f"{dea_val:.6f}" if dea_val is not None else "NA",
+        )
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
         equity = self.exec.account_equity()
@@ -175,12 +207,14 @@ class SuperTrendStrategy(Strategy):
         if add_long > 0:
             resp = self.exec.open_long(add_long, last_close)
             record(resp, f"open_long_{add_long}")
-            current_long += add_long
+            if resp and resp.get("status") == "ok":
+                current_long += add_long
         add_short = max(0, desired_short - current_short)
         if add_short > 0:
             resp = self.exec.open_short(add_short, last_close)
             record(resp, f"open_short_{add_short}")
-            current_short += add_short
+            if resp and resp.get("status") == "ok":
+                current_short += add_short
 
         self.exec.cancel_all_conditional()
         if current_long > 0 and stop_loss is not None:
@@ -195,7 +229,7 @@ class SuperTrendStrategy(Strategy):
         fee = sum(fees) if fees else None
         order_id = "|".join(order_ids) if order_ids else None
 
-        mode_str = f"{'OKX-DEMO-SWAP' if self.cfg.use_demo else 'OKX-SWAP'}"
+        mode_str = "BINANCE-USDM-TEST" if self.cfg.use_demo else "BINANCE-USDM"
         self.csv.append(
             {
                 "timestamp": datetime.now(),

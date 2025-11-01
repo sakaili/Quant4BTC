@@ -26,7 +26,7 @@ class Strategy(ABC):
         """Execute one strategy cycle."""
 
     def align_and_loop(self, align_fn: Callable[[], None]) -> None:
-        mode_str = "OKX模拟账户" if self.cfg.use_demo else "OKX实盘账户"
+        mode_str = "Binance Testnet" if self.cfg.use_demo else "Binance Futures"
         self.logger.info(
             "启动循环 MODE=%s, SYMBOL=%s, TF=%s, SELECTION=%s, STRAT_MODE=%s",
             mode_str,

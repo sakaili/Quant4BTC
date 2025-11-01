@@ -1,129 +1,161 @@
-﻿# exchange_client.py
+# exchange_client.py
 import ccxt
 from typing import Any, Dict
+
 from config import Config
 
 
 class ExchangeClient:
-    """最薄封装 ccxt.okx，负责建立连接并管理交易所状态。"""
+    """Thin wrapper around ccxt for Binance USD-M futures."""
 
     def __init__(self, cfg: Config, logger):
-        """初始化 okx 客户端，处理沙盒/实盘、杠杆和持仓模式设置。"""
         self.cfg = cfg
         self.logger = logger
-        self.exchange = ccxt.okx({
-            'apiKey': cfg.okx_api_key,
-            'secret': cfg.okx_secret,
-            'password': cfg.okx_password,
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'},
-            'proxies': cfg.proxies(),
-            'timeout': 20000
-        })
-        self.exchange.set_sandbox_mode(bool(cfg.use_demo))
+        options = {
+            "apiKey": cfg.binance_api_key,
+            "secret": cfg.binance_secret,
+            "enableRateLimit": True,
+            "options": {
+                "defaultType": "future",
+                "defaultSubType": "linear",
+                "adjustForTimeDifference": True,
+                "recvWindow": cfg.binance_recv_window,
+                "testnet": bool(cfg.use_demo),
+            },
+            "proxies": cfg.proxies(),
+            "timeout": 20000,
+        }
+
+        self.exchange = ccxt.binanceusdm(options)
+
+        try:
+            # ccxt toggles sandbox endpoints for binance via this helper
+            self.exchange.set_sandbox_mode(bool(cfg.use_demo))
+        except Exception as exc:  # pragma: no cover - depends on ccxt version
+            self.logger.warning(f"Failed to enable Binance sandbox mode: {exc}")
+
         self.exchange.load_markets()
-        # 模式与杠杆
+
         try:
-            hedged = (cfg.position_mode.lower() == 'hedge')
-            self.exchange.set_position_mode(hedged, cfg.symbol)
-            self.logger.info(f"已设置 POSITION_MODE={cfg.position_mode}")
-        except Exception as e:
-            self.logger.warning(f"设置 POSITION_MODE 失败：{e}")
+            hedged = cfg.position_mode.lower() == "hedge"
+            # ccxt normalises hedge=True/False for Binance dual-side mode
+            self.exchange.set_position_mode(hedged, symbol=cfg.symbol)
+            self.logger.info(f"Set POSITION_MODE={cfg.position_mode}")
+        except Exception as exc:
+            self.logger.warning(f"Unable to set position mode: {exc}")
+
         try:
-            self.exchange.set_leverage(cfg.leverage, cfg.symbol, params={'mgnMode': cfg.margin_mode})
-            self.logger.info(f"已设置 LEVERAGE={cfg.leverage}, MARGIN_MODE={cfg.margin_mode}")
-        except Exception as e:
-            self.logger.warning(f"设置杠杆失败：{e}")
+            margin_mode = cfg.margin_mode.lower()
+            if margin_mode in {"isolated", "cross"}:
+                self.exchange.set_margin_mode(margin_mode, symbol=cfg.symbol)
+                self.logger.info(f"Set MARGIN_MODE={cfg.margin_mode}")
+        except Exception as exc:
+            self.logger.warning(f"Unable to set margin mode: {exc}")
+
+        try:
+            self.exchange.set_leverage(cfg.leverage, symbol=cfg.symbol)
+            self.logger.info(f"Set LEVERAGE={cfg.leverage}")
+        except Exception as exc:
+            self.logger.warning(f"Unable to set leverage: {exc}")
+
         self.market_info = self.exchange.market(cfg.symbol)
 
     def amount_to_precision(self, n: float) -> float:
-        """按交易所规则修正合约张数，失败时回退到四舍五入。"""
+        """Clamp contract amount to exchange precision."""
+
         try:
             return float(self.exchange.amount_to_precision(self.cfg.symbol, n))
         except Exception:
-            return float(int(round(n)))
+            return float(n)
 
     def price_to_precision(self, p: float) -> float:
-        """按交易所 tick size 修正价格。"""
+        """Clamp price to the instrument tick size."""
+
         return float(self.exchange.price_to_precision(self.cfg.symbol, p))
 
     def min_contracts(self) -> float:
-        """读取交易所要求的最小下单数量，不可用时落到 1 张。"""
+        """Return the minimum order quantity supported by the market."""
+
         try:
-            min_amt = self.market_info.get('limits', {}).get('amount', {}).get('min', None)
+            min_amt = self.market_info.get("limits", {}).get("amount", {}).get("min")
             if min_amt is not None:
-                return max(1.0, float(min_amt))
+                return float(min_amt)
         except Exception:
             pass
-        return 1.0
+        return 0.0
 
-    # 数据与账户
+    # ---------- Market data ----------
     def fetch_ohlcv(self, limit: int):
-        """获取最新 K 线数据，列顺序与 ccxt 保持一致。"""
+        """Fetch OHLCV data using the configured timeframe."""
+
         return self.exchange.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe, limit=limit)
 
     def fetch_ticker_last(self) -> float:
-        """读取最新成交价用于风控或下单。"""
-        t = self.exchange.fetch_ticker(self.cfg.symbol)
-        return float(t['last'])
+        ticker = self.exchange.fetch_ticker(self.cfg.symbol)
+        return float(ticker["last"])
 
     def fetch_balance_swap(self) -> Dict[str, Any] | None:
-        """拉取 swap 账户的资产信息，捕获异常避免崩溃。"""
+        """Fetch futures account balances."""
+
         try:
-            return self.exchange.fetch_balance({'type': 'swap'})
-        except Exception as e:
-            self.logger.error(f"获取合约余额失败: {e}")
+            return self.exchange.fetch_balance({"type": "future"})
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch futures balance: {exc}")
             return None
 
     def fetch_positions(self):
-        """查询目标合约的全部持仓，失败返回空列表。"""
         try:
             return self.exchange.fetch_positions([self.cfg.symbol])
-        except Exception as e:
-            self.logger.error(f"获取持仓失败: {e}")
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch positions: {exc}")
             return []
 
-    # 下单
+    # ---------- Trading ----------
+    def _hedge_side_param(self, pos_side: str | None) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if self.cfg.position_mode.lower() == "hedge" and pos_side in {"long", "short"}:
+            params["positionSide"] = "LONG" if pos_side == "long" else "SHORT"
+        return params
+
     def create_market_order(
         self,
         side: str,
-        amount: int,
+        amount: float,
         reduce_only: bool,
         pos_side: str | None,
     ):
-        """构造带有 margin/posSide 参数的市价单。"""
-        params = {'tdMode': self.cfg.margin_mode, 'reduceOnly': bool(reduce_only)}
-        if self.cfg.position_mode.lower() == 'hedge' and pos_side in ('long', 'short'):
-            params['posSide'] = pos_side
+        params: Dict[str, Any] = {}
+        hedge_params = self._hedge_side_param(pos_side)
+        params.update(hedge_params)
+        if reduce_only and not hedge_params:
+            params["reduceOnly"] = True
         return self.exchange.create_order(
             symbol=self.cfg.symbol,
-            type='market',
+            type="market",
             side=side,
             amount=amount,
             price=None,
-            params=params
+            params=params,
         )
 
     def create_stop_market_order(
         self,
         side: str,
-        amount: int,
+        amount: float,
         trigger_price: float,
         pos_side: str | None,
     ):
-        """下达条件止损市价单，挂在交易所侧执行。"""
-        params: dict = {
-            'tdMode': self.cfg.margin_mode,
-            'reduceOnly': True,
-            'stopLossPrice': float(self.price_to_precision(trigger_price)),
-            'slOrdPx': '-1',
-            'slTriggerPxType': 'last',
+        params: Dict[str, Any] = {
+            "stopPrice": float(self.price_to_precision(trigger_price)),
+            "workingType": "CONTRACT_PRICE",
         }
-        if self.cfg.position_mode.lower() == 'hedge' and pos_side in ('long', 'short'):
-            params['posSide'] = pos_side
+        hedge_params = self._hedge_side_param(pos_side)
+        params.update(hedge_params)
+        if not hedge_params:
+            params["reduceOnly"] = True
         return self.exchange.create_order(
             symbol=self.cfg.symbol,
-            type='conditional',
+            type="STOP_MARKET",
             side=side,
             amount=amount,
             price=None,
@@ -131,33 +163,9 @@ class ExchangeClient:
         )
 
     def cancel_all_conditional_orders(self):
-        """取消当前合约所有条件单（止损/止盈）。"""
         try:
-            inst_id = self.market_info.get('id')
-            if not inst_id:
-                self.logger.warning("未获取到 instId，无法取消条件单")
-                return {'status': 'error', 'reason': 'missing instId'}
-            params = {
-                'instType': 'SWAP',
-                'instId': inst_id,
-                'ordType': 'conditional',
-                'state': 'live'
-            }
-            resp = self.exchange.privateGetTradeOrdersAlgoPending(params)
-            data = (resp or {}).get('data', [])
-            if not data:
-                self.logger.info("没有需要取消的条件单")
-                return {'status': 'ok', 'cancelled': 0}
-            requests = [{'instId': inst_id, 'algoId': algo.get('algoId')} for algo in data if algo.get('algoId')]
-            cancelled = 0
-            for i in range(0, len(requests), 10):
-                batch = requests[i:i+10]
-                cancel_resp = self.exchange.privatePostTradeCancelAlgos(batch)
-                for item in (cancel_resp or {}).get('data', []):
-                    if item.get('sCode') == '0':
-                        cancelled += 1
-            self.logger.info(f"已取消 {cancelled}/{len(requests)} 个条件单")
-            return {'status': 'ok', 'cancelled': cancelled}
-        except Exception as e:
-            self.logger.error(f"取消条件单失败: {e}")
-            return {'status': 'error', 'reason': str(e)}
+            cancelled = self.exchange.cancel_all_orders(self.cfg.symbol)
+            return {"status": "ok", "cancelled": len(cancelled) if cancelled else 0}
+        except Exception as exc:
+            self.logger.error(f"Failed to cancel stop orders: {exc}")
+            return {"status": "error", "reason": str(exc)}
