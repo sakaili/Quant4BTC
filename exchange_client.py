@@ -34,7 +34,8 @@ class ExchangeClient:
         except Exception as exc:  # pragma: no cover - depends on ccxt version
             self.logger.warning(f"Failed to enable Binance sandbox mode: {exc}")
 
-        self.exchange.load_markets()
+        self.exchange.options["warnOnFetchCurrencies"] = False
+        self.exchange.load_markets(reload=True, params={"fetchCurrencies": False})
 
         try:
             hedged = cfg.position_mode.lower() == "hedge"

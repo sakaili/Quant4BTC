@@ -20,7 +20,7 @@ class Config:
     fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "0.01"))
 
     # Environment toggles
-    use_demo: bool = os.getenv("USE_DEMO", "true").lower() in TRUE_SET
+    use_demo: bool = False
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     strategy_name: str = os.getenv("STRATEGY_NAME", "supertrend")
     use_macd_filter: bool = os.getenv("USE_MACD_FILTER", "false").lower() in TRUE_SET
