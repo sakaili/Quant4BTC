@@ -83,7 +83,7 @@ class Config:
     # Signal controls
     signal_confirm: int = int(os.getenv("SIGNAL_CONFIRM", "1"))
     band_eps: float = float(os.getenv("BAND_EPS", "0.0005"))
-    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "10"))
+    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "3"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
 
     # Normalisation
