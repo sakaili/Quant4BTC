@@ -40,8 +40,8 @@ class Config:
     position_mode: str = os.getenv("POSITION_MODE", "hedge")  # hedge / net
 
     # Indicator / selection parameters
-    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "300"))
-    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "600"))
+    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "25"))
+    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "50"))
     feature_ema: int = int(os.getenv("FEATURE_EMA", "20"))
     n_clusters: int = int(os.getenv("N_CLUSTERS", "3"))
 
@@ -66,7 +66,7 @@ class Config:
 
     # Cost model (slippage, fees, penalties)
     slippage_rate: float = float(os.getenv("SLIPPAGE_RATE", "0.0001"))
-    fee_rate: float = float(os.getenv("FEE_RATE", "0.0005"))
+    fee_rate: float = float(os.getenv("FEE_RATE", "0.0000275"))
     turnover_penalty: float = float(os.getenv("TURNOVER_PENALTY", "0.0"))
 
     # Logging

@@ -2,7 +2,7 @@
 import argparse
 import json
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from config import Config
-from evaluator import Evaluator
+from evaluator import Evaluator, periods_per_year
 from indicators import IndicatorEngine
 from selector import FactorSelector
 from signals import SignalBuilder
@@ -234,16 +234,18 @@ def _evaluate_event_metrics(state: dict[str, np.ndarray | float], cfg: Config) -
         mdd = float(drawdown.max())
         last_eq = float(eq_norm[-1])
 
-    ann = 252.0
-    sharpe = float((np.mean(ret) * ann) / (np.std(ret) * np.sqrt(ann) + 1e-12)) if ret.size > 0 else 0.0
+    ann_factor = periods_per_year(cfg)
+    mean_ret = float(np.mean(ret)) if ret.size > 0 else 0.0
+    std_ret = float(np.std(ret)) if ret.size > 0 else 0.0
+    sharpe = float((mean_ret * np.sqrt(ann_factor)) / (std_ret + 1e-12)) if ret.size > 0 else 0.0
     if eq_norm.size == 0:
         cagr = 0.0
     elif last_eq <= 0:
         cagr = -1.0
     else:
-        cagr = float(last_eq ** (ann / max(len(eq_norm), 1)) - 1.0)
+        cagr = float(last_eq ** (ann_factor / max(len(eq_norm), 1)) - 1.0)
 
-    sortino = Evaluator._sortino(ret, ann=np.sqrt(ann)) if ret.size > 0 else 0.0
+    sortino = Evaluator._sortino(ret, ann_factor=np.sqrt(ann_factor)) if ret.size > 0 else 0.0
     calmar = (cagr / (mdd + 1e-12)) if mdd > 0 else cagr
     turns = float(state.get("turns", 0.0) or 0.0)
     return {
@@ -472,6 +474,7 @@ def main():
 
     symbol = args.symbol or base_cfg.symbol
     cfg = replace(base_cfg, symbol=symbol, timeframe=args.timeframe)
+    cfg_dict = asdict(cfg)
     if strategy == "supertrend" and args.selection:
         cfg = replace(cfg, selection=args.selection)
     data = load_data(args.data, args.start, args.end)
@@ -505,9 +508,13 @@ def main():
     }
     if strategy == "supertrend":
         summary["factor"] = factor
+    summary["config"] = cfg_dict
 
     with open(result_dir / "summary.json", "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2)
+
+    with open(result_dir / "config.json", "w", encoding="utf-8") as fh:
+        json.dump(cfg_dict, fh, ensure_ascii=False, indent=2)
 
     _plot_artifacts(timeseries, trades, strategy, result_dir / "backtest_plot.png")
 
