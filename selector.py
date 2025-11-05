@@ -16,18 +16,25 @@ class FactorSelector:
         self.ind = IndicatorEngine(cfg)
         self.eval = Evaluator(cfg)
         self._last_factor = None
+        self._last_bar_idx = None
 
     def maybe_select(self, df_atr: pd.DataFrame) -> float:
-        """���败������ѡ�Σ�����Ƶ���л���ɵ�������"""
+        """按需触发重新选参，减少频繁切换造成的噪音。"""
+        cur_idx = len(df_atr)
+        if not self._allow_recalc(cur_idx):
+            return float(self._last_factor)
         try:
             f = self._select(df_atr)
         except Exception:
-            if self._last_factor is not None:
-                return float(self._last_factor)
-            f = 2.0
-        self._last_factor = float(f)
-        return self._last_factor
+            f = self._last_factor if self._last_factor is not None else 2.0
+        if (self._last_factor is None) or (abs(f - self._last_factor) > self.cfg.factor_sticky):
+            self._last_factor = f
+        self._last_bar_idx = cur_idx
+        return float(self._last_factor)
 
+    def _allow_recalc(self, cur_idx: int) -> bool:
+        """检查是否满足重新评估因子的最小间隔。"""
+        return (self._last_factor is None) or (self._last_bar_idx is None) or ((cur_idx - self._last_bar_idx) >= self.cfg.factor_hold_bars)
 
     def _select(self, df_atr: pd.DataFrame) -> float:
         """按照配置选择具体的选参策略。"""
@@ -143,6 +150,3 @@ class FactorSelector:
             metrics.append(m)
         best = max(metrics, key=self.eval.score)
         return float(best['factor'])
-
-
-

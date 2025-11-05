@@ -40,9 +40,9 @@ class Config:
     position_mode: str = os.getenv("POSITION_MODE", "hedge")  # hedge / net
 
     # Indicator / selection parameters
-    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "25"))
-    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "50"))
-    feature_ema: int = int(os.getenv("FEATURE_EMA", "20"))
+    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "100"))
+    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "200"))
+    feature_ema: int = int(os.getenv("FEATURE_EMA", "12"))
     n_clusters: int = int(os.getenv("N_CLUSTERS", "3"))
 
     atr_length: int = int(os.getenv("ATR_LENGTH", "5"))

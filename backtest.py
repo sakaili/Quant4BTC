@@ -140,6 +140,7 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
     notional_list: list[float] = []
     trade_pnl_list: list[float] = []
     exec_price_list: list[float] = []
+    position_entry_price = 0.0
 
     prev_equity = initial_capital
     eps = 1e-12
@@ -151,7 +152,9 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
         if abs(delta) <= eps:
             delta = 0.0
 
-        equity_before_trade = cash + position_units * price_f
+        pos_before = position_units
+        entry_price_before = position_entry_price
+        equity_before_trade = cash + pos_before * price_f
         fee = 0.0
         penalty_cost = 0.0
         exec_price = float("nan")
@@ -165,9 +168,30 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
                 penalty_cost = turnover_penalty * (abs(delta) / (qty + eps))
                 cash -= penalty_cost
             position_units = target_units
-            trade_pnl = (cash + position_units * price_f) - equity_before_trade
+            closed_units = 0.0
+            if pos_before != 0.0:
+                if position_units == 0.0 or np.sign(pos_before) != np.sign(position_units):
+                    closed_units = abs(pos_before)
+                elif abs(position_units) + eps < abs(pos_before):
+                    closed_units = abs(pos_before) - abs(position_units)
+            realized_pnl = 0.0
+            if closed_units > 0.0 and entry_price_before > 0.0:
+                realized_pnl = closed_units * (exec_price - entry_price_before) * np.sign(pos_before)
+            trade_pnl = realized_pnl - (fee + penalty_cost)
+            if position_units == 0.0:
+                position_entry_price = 0.0
+            elif pos_before == 0.0 or np.sign(position_units) != np.sign(pos_before):
+                position_entry_price = exec_price
+            elif abs(position_units) > abs(pos_before) + eps:
+                added_units = abs(position_units) - abs(pos_before)
+                position_entry_price = (
+                    entry_price_before * abs(pos_before) + exec_price * added_units
+                ) / abs(position_units)
+            else:
+                position_entry_price = entry_price_before
         else:
             position_units = target_units
+            position_entry_price = entry_price_before
 
         trade_cost = fee + penalty_cost
         delta_list.append(delta)
