@@ -20,7 +20,7 @@ class Config:
     fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "0.01"))
 
     # Environment toggles
-    use_demo: bool = False
+    use_demo: bool = os.getenv("USE_DEMO", "false").lower() in TRUE_SET
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     strategy_name: str = os.getenv("STRATEGY_NAME", "supertrend")
     use_macd_filter: bool = os.getenv("USE_MACD_FILTER", "false").lower() in TRUE_SET
@@ -40,8 +40,8 @@ class Config:
     position_mode: str = os.getenv("POSITION_MODE", "hedge")  # hedge / net
 
     # Indicator / selection parameters
-    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "100"))
-    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "200"))
+    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "20"))
+    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "20"))
     feature_ema: int = int(os.getenv("FEATURE_EMA", "12"))
     n_clusters: int = int(os.getenv("N_CLUSTERS", "3"))
 
@@ -83,15 +83,17 @@ class Config:
     # Signal controls
     signal_confirm: int = int(os.getenv("SIGNAL_CONFIRM", "1"))
     band_eps: float = float(os.getenv("BAND_EPS", "0.0005"))
-    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "3"))
+    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "12"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
 
     # Normalisation
-    zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "500"))
-    min_regime_samples: int = int(os.getenv("MIN_REGIME_SAMPLES", "50"))
+    zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))
+    min_regime_samples: int = int(os.getenv("MIN_REGIME_SAMPLES", "8"))
     min_cluster_frac: float = float(os.getenv("MIN_CLUSTER_FRAC", "0.05"))
 
-    backtest_trade_size: float = float(os.getenv("BACKTEST_TRADE_SIZE", "0.01"))
+    backtest_trade_size: float = float(os.getenv("BACKTEST_TRADE_SIZE", "0.02"))
+    dump_kmeans_debug: bool = os.getenv("DUMP_KMEANS_DEBUG", "true").lower() in TRUE_SET
+    kmeans_debug_dir: str = os.getenv("KMEANS_DEBUG_DIR", "kmeans_debug")
 
     def proxies(self):
         """Return optional proxy settings in ccxt format."""

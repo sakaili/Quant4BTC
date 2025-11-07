@@ -141,10 +141,28 @@ class SuperTrendStrategy(Strategy):
             macd_allowed = True
             dif_val = dea_val = None
 
+        selection_info = {}
+        if hasattr(self.selector, "last_selection_info"):
+            selection_info = self.selector.last_selection_info() or {}
+        factor_source = selection_info.get("method", "unknown")
+        fallback_reason = selection_info.get("reason")
+        if selection_info.get("fallback"):
+            source_desc = f"{factor_source}|fallback"
+            if fallback_reason:
+                source_desc += f":{fallback_reason}"
+        elif factor_source in {"cluster_kmeans", "regime_kmeans"}:
+            source_desc = "kmeans"
+        else:
+            source_desc = factor_source
+        if selection_info.get("reuse"):
+            source_desc = f"{source_desc}|reuse"
+        factor_display = float(selection_info.get("factor") or best_factor)
+
         self.logger.info(
-            "信号: %s 倍数: %.3f Close: %.2f MACD过滤:%s DIF:%s DEA:%s",
+            "信号:%s 因子:%.3f 来源:%s Close: %.2f MACD过滤:%s DIF:%s DEA:%s",
             current_signal,
-            best_factor,
+            factor_display,
+            source_desc,
             last_close,
             "启用" if self.cfg.use_macd_filter else "未启用",
             f"{dif_val:.6f}" if dif_val is not None else "NA",
