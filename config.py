@@ -40,8 +40,8 @@ class Config:
     position_mode: str = os.getenv("POSITION_MODE", "hedge")  # hedge / net
 
     # Indicator / selection parameters
-    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "20"))
-    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "20"))
+    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "40"))
+    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "40"))
     feature_ema: int = int(os.getenv("FEATURE_EMA", "12"))
     n_clusters: int = int(os.getenv("N_CLUSTERS", "3"))
 
@@ -83,8 +83,9 @@ class Config:
     # Signal controls
     signal_confirm: int = int(os.getenv("SIGNAL_CONFIRM", "1"))
     band_eps: float = float(os.getenv("BAND_EPS", "0.0005"))
-    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "12"))
+    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "1"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
+    force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
 
     # Normalisation
     zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))

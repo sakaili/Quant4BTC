@@ -36,7 +36,8 @@ class FactorSelector:
     def maybe_select(self, df_atr: pd.DataFrame) -> float:
         """Select factor with minimal recalculation noise."""
         cur_idx = len(df_atr)
-        if not self._allow_recalc(cur_idx):
+        force_recalc = bool(getattr(self.cfg, "force_factor_recalc", False))
+        if (not force_recalc) and (not self._allow_recalc(cur_idx)):
             self._mark_reuse()
             return float(self._last_factor)
         try:
