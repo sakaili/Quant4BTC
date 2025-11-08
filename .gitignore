@@ -21,7 +21,6 @@ logs/
 *.log
 data/
 backTestResult/
-kmeans_debug/
 
 # OS files
 .DS_Store

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from strategies.base import Strategy
@@ -36,6 +36,9 @@ class SuperTrendStrategy(Strategy):
         self.ind = indicator_engine
         self.sbuilder = signal_builder
         self.selector = factor_selector
+        self._cooldown_until: datetime | None = None
+        self._trade_anchor_equity: float | None = None
+        self._position_sign: int = 0
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
         pct = max(0.0, float(self.cfg.stop_loss_pct))
@@ -114,6 +117,15 @@ class SuperTrendStrategy(Strategy):
             self.logger.warning("数据不足以计算指标")
             return
 
+        now = datetime.utcnow()
+        if self._cooldown_until:
+            if now < self._cooldown_until:
+                remaining = (self._cooldown_until - now).total_seconds() / 60.0
+                self.logger.info('Cooldown active, %.1f min remaining', remaining)
+                return
+            self.logger.info('Cooldown finished, resuming trading')
+            self._cooldown_until = None
+
         best_factor = self.selector.maybe_select(df_atr)
         st = self.ind.compute_supertrend(df_atr, best_factor)
         sig_arr = self.sbuilder.build(df_atr, st)
@@ -171,6 +183,37 @@ class SuperTrendStrategy(Strategy):
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
         equity = self.exec.account_equity()
+        cooldown_loss_pct = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
+        cooldown_minutes = int(getattr(self.cfg, "cooldown_duration_minutes", 0))
+        net_sign = 1 if long_amt > 0 else -1 if short_amt > 0 else 0
+        if net_sign == 0:
+            self._trade_anchor_equity = None
+            self._position_sign = 0
+        else:
+            if self._position_sign != net_sign or self._trade_anchor_equity is None:
+                self._trade_anchor_equity = equity if equity > 0 else None
+                self._position_sign = net_sign
+        if (
+            net_sign != 0
+            and cooldown_loss_pct > 0
+            and cooldown_minutes > 0
+            and self._trade_anchor_equity
+            and self._trade_anchor_equity > 0
+        ):
+            loss_ratio = (self._trade_anchor_equity - equity) / self._trade_anchor_equity
+            if loss_ratio >= cooldown_loss_pct:
+                duration = max(1, cooldown_minutes)
+                self.logger.error(
+                    "Single-trade loss %.2f%% reached, cooldown %d minutes, flattening positions",
+                    loss_ratio * 100,
+                    duration,
+                )
+                self._flatten_positions(long_amt, short_amt, last_close)
+                self._cooldown_until = datetime.utcnow() + timedelta(minutes=duration)
+                self._trade_anchor_equity = None
+                self._position_sign = 0
+                return
+
         drawdown_state = self._assess_drawdown(equity)
         if drawdown_state:
             msg = {
