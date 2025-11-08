@@ -214,6 +214,19 @@ class SuperTrendStrategy(Strategy):
                 self._position_sign = 0
                 return
 
+        anchor_equity = self._trade_anchor_equity or equity
+        unrealized_pct = (
+            ((equity - anchor_equity) / anchor_equity) * 100.0 if anchor_equity > 0 else 0.0
+        )
+        self.logger.info(
+            "Position long=%.4f short=%.4f net=%d equity=%.2f unrealized=%.2f%%",
+            long_amt,
+            short_amt,
+            net_sign,
+            equity,
+            unrealized_pct,
+        )
+
         drawdown_state = self._assess_drawdown(equity)
         if drawdown_state:
             msg = {
@@ -278,12 +291,16 @@ class SuperTrendStrategy(Strategy):
                 current_short += add_short
 
         self.exec.cancel_all_conditional()
-        if current_long > 0 and stop_loss is not None:
-            hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-            self.exec.place_stop("sell", current_long, stop_loss, hedge_ps)
-        elif current_short > 0 and stop_loss is not None:
-            hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-            self.exec.place_stop("buy", current_short, stop_loss, hedge_ps)
+        pct_stop = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
+        if pct_stop > 0:
+            if current_long > 0:
+                stop_price = max(0.0, last_close * (1.0 - pct_stop))
+                hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+                self.exec.place_stop("sell", current_long, stop_price, hedge_ps)
+            elif current_short > 0:
+                stop_price = max(0.0, last_close * (1.0 + pct_stop))
+                hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+                self.exec.place_stop("buy", current_short, stop_price, hedge_ps)
 
         action_str = "|".join(actions) if actions else None
         exec_price = prices[-1] if prices else None
