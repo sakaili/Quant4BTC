@@ -39,6 +39,8 @@ class SuperTrendStrategy(Strategy):
         self._cooldown_until: datetime | None = None
         self._trade_anchor_equity: float | None = None
         self._position_sign: int = 0
+        self._entry_price_long: float | None = None
+        self._entry_price_short: float | None = None
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
         pct = max(0.0, float(self.cfg.stop_loss_pct))
@@ -278,27 +280,49 @@ class SuperTrendStrategy(Strategy):
         current_short = max(0, short_amt - reduce_short)
 
         add_long = max(0, desired_long - current_long)
+        long_avg_base = current_long
         if add_long > 0:
             resp = self.exec.open_long(add_long, last_close)
             record(resp, f"open_long_{add_long}")
             if resp and resp.get("status") == "ok":
+                fill_price = float(resp.get("price") or last_close)
+                prev_amt = current_long
                 current_long += add_long
+                if prev_amt <= 0 or self._entry_price_long is None:
+                    self._entry_price_long = fill_price
+                else:
+                    self._entry_price_long = (
+                        (prev_amt * self._entry_price_long) + (add_long * fill_price)
+                    ) / (prev_amt + add_long)
+        if current_long == 0:
+            self._entry_price_long = None
+
         add_short = max(0, desired_short - current_short)
         if add_short > 0:
             resp = self.exec.open_short(add_short, last_close)
             record(resp, f"open_short_{add_short}")
             if resp and resp.get("status") == "ok":
+                fill_price = float(resp.get("price") or last_close)
+                prev_amt = current_short
                 current_short += add_short
+                if prev_amt <= 0 or self._entry_price_short is None:
+                    self._entry_price_short = fill_price
+                else:
+                    self._entry_price_short = (
+                        (prev_amt * self._entry_price_short) + (add_short * fill_price)
+                    ) / (prev_amt + add_short)
+        if current_short == 0:
+            self._entry_price_short = None
 
         self.exec.cancel_all_conditional()
         pct_stop = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
         if pct_stop > 0:
-            if current_long > 0:
-                stop_price = max(0.0, last_close * (1.0 - pct_stop))
+            if current_long > 0 and self._entry_price_long:
+                stop_price = max(0.0, self._entry_price_long * (1.0 - pct_stop))
                 hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
                 self.exec.place_stop("sell", current_long, stop_price, hedge_ps)
-            elif current_short > 0:
-                stop_price = max(0.0, last_close * (1.0 + pct_stop))
+            elif current_short > 0 and self._entry_price_short:
+                stop_price = max(0.0, self._entry_price_short * (1.0 + pct_stop))
                 hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
                 self.exec.place_stop("buy", current_short, stop_price, hedge_ps)
 
