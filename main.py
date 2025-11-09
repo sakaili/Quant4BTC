@@ -53,6 +53,10 @@ def main():
         symbol_logger = base_logger.getChild(symbol_tag)
         csv_path = resolve_csv_path(base_cfg.csv_log_file, symbol_tag)
         symbol_cfg = replace(base_cfg, symbol=symbol, csv_log_file=csv_path)
+        fixed_size = symbol_cfg.fixed_order_size
+        if symbol.upper().startswith("ETH/") or symbol.upper().startswith("ETH"):
+            fixed_size = 0.3
+        symbol_cfg = replace(symbol_cfg, fixed_order_size=fixed_size)
         exch = ExchangeClient(symbol_cfg, symbol_logger)
         data_fetcher = DataFetcher(symbol_cfg, exch, symbol_logger)
         indicator_engine = IndicatorEngine(symbol_cfg)
