@@ -42,6 +42,7 @@ class SuperTrendStrategy(Strategy):
         self._entry_price_long: float | None = None
         self._entry_price_short: float | None = None
         self._entry_equity: float | None = None
+        self._last_executed_signal: int | None = None
 
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
@@ -134,6 +135,13 @@ class SuperTrendStrategy(Strategy):
         st = self.ind.compute_supertrend(df_atr, best_factor)
         sig_arr = self.sbuilder.build(df_atr, st)
         current_signal = int(sig_arr[-1])
+        if self._last_executed_signal is None and current_signal != 0:
+            self.logger.info("Warmup phase: observing initial signal %s, awaiting reversal before first trade", current_signal)
+            self._last_executed_signal = current_signal
+            return
+        if self._last_executed_signal is not None and current_signal == self._last_executed_signal:
+            self.logger.info("Signal %s unchanged, skip trade this cycle", current_signal)
+            return
         last_close = float(df_atr["Close"].iloc[-1])
 
         if self.cfg.use_macd_filter:
@@ -383,3 +391,4 @@ class SuperTrendStrategy(Strategy):
                 "mode": mode_str,
             }
         )
+        self._last_executed_signal = current_signal
