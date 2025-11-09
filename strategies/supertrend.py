@@ -41,6 +41,8 @@ class SuperTrendStrategy(Strategy):
         self._position_sign: int = 0
         self._entry_price_long: float | None = None
         self._entry_price_short: float | None = None
+        self._entry_equity: float | None = None
+
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
         pct = max(0.0, float(self.cfg.stop_loss_pct))
@@ -185,35 +187,44 @@ class SuperTrendStrategy(Strategy):
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
         equity = self.exec.account_equity()
+        cooldown_loss_amount = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
         cooldown_loss_pct = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
         cooldown_minutes = int(getattr(self.cfg, "cooldown_duration_minutes", 0))
         net_sign = 1 if long_amt > 0 else -1 if short_amt > 0 else 0
         if net_sign == 0:
             self._trade_anchor_equity = None
             self._position_sign = 0
+            self._entry_equity = None
         else:
             if self._position_sign != net_sign or self._trade_anchor_equity is None:
                 self._trade_anchor_equity = equity if equity > 0 else None
                 self._position_sign = net_sign
+                self._entry_equity = self._trade_anchor_equity
         if (
             net_sign != 0
-            and cooldown_loss_pct > 0
             and cooldown_minutes > 0
             and self._trade_anchor_equity
             and self._trade_anchor_equity > 0
         ):
-            loss_ratio = (self._trade_anchor_equity - equity) / self._trade_anchor_equity
-            if loss_ratio >= cooldown_loss_pct:
+            loss_amount = self._trade_anchor_equity - equity
+            trigger = False
+            if cooldown_loss_amount > 0 and loss_amount >= cooldown_loss_amount:
+                trigger = True
+            elif cooldown_loss_amount <= 0 and cooldown_loss_pct > 0:
+                loss_ratio = loss_amount / self._trade_anchor_equity
+                trigger = loss_ratio >= cooldown_loss_pct
+            if trigger:
                 duration = max(1, cooldown_minutes)
                 self.logger.error(
-                    "Single-trade loss %.2f%% reached, cooldown %d minutes, flattening positions",
-                    loss_ratio * 100,
+                    "Single-trade loss %.2f USDT reached, cooldown %d minutes, flattening positions",
+                    loss_amount,
                     duration,
                 )
                 self._flatten_positions(long_amt, short_amt, last_close)
                 self._cooldown_until = datetime.utcnow() + timedelta(minutes=duration)
                 self._trade_anchor_equity = None
                 self._position_sign = 0
+                self._entry_equity = None
                 return
 
         anchor_equity = self._trade_anchor_equity or equity
@@ -315,8 +326,31 @@ class SuperTrendStrategy(Strategy):
             self._entry_price_short = None
 
         self.exec.cancel_all_conditional()
+        market_info = self.exec.market_info()
+        contract_value = float(
+            market_info.get("contractSize") or market_info.get("ctVal") or 1.0
+        )
+        loss_amount_cfg = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
         pct_stop = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
-        if pct_stop > 0:
+        placed_stop = False
+        if loss_amount_cfg > 0 and contract_value > 0:
+            if current_long > 0 and self._entry_price_long:
+                denom = current_long * contract_value
+                if denom > 0:
+                    delta = loss_amount_cfg / denom
+                    stop_price = max(0.0, self._entry_price_long - delta)
+                    hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+                    self.exec.place_stop("sell", current_long, stop_price, hedge_ps)
+                    placed_stop = True
+            elif current_short > 0 and self._entry_price_short:
+                denom = current_short * contract_value
+                if denom > 0:
+                    delta = loss_amount_cfg / denom
+                    stop_price = max(0.0, self._entry_price_short + delta)
+                    hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+                    self.exec.place_stop("buy", current_short, stop_price, hedge_ps)
+                    placed_stop = True
+        if not placed_stop and pct_stop > 0:
             if current_long > 0 and self._entry_price_long:
                 stop_price = max(0.0, self._entry_price_long * (1.0 - pct_stop))
                 hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None

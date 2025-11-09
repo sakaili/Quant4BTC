@@ -40,15 +40,15 @@ class Config:
     position_mode: str = os.getenv("POSITION_MODE", "hedge")  # hedge / net
 
     # Indicator / selection parameters
-    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "20"))
-    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "40"))
+    metric_lookback: int = int(os.getenv("METRIC_LOOKBACK", "50"))
+    regime_lookback: int = int(os.getenv("REGIME_LOOKBACK", "50"))
     feature_ema: int = int(os.getenv("FEATURE_EMA", "12"))
     n_clusters: int = int(os.getenv("N_CLUSTERS", "3"))
 
     atr_length: int = int(os.getenv("ATR_LENGTH", "5"))
-    min_mult: float = float(os.getenv("MIN_MULT", "0.25"))
+    min_mult: float = float(os.getenv("MIN_MULT", "0.8"))
     max_mult: float = float(os.getenv("MAX_MULT", "3.5"))
-    step: float = float(os.getenv("STEP", "0.25"))
+    step: float = float(os.getenv("STEP", "0.5"))
     selection: str = os.getenv("SELECTION", "regime_kmeans")
 
     macd_fast_length: int = int(os.getenv("MACD_FAST_LENGTH", "12"))
@@ -83,15 +83,16 @@ class Config:
     # Signal controls
     signal_confirm: int = int(os.getenv("SIGNAL_CONFIRM", "1"))
     band_eps: float = float(os.getenv("BAND_EPS", "0.0005"))
-    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "1"))
+    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "3"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
     force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
-    cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.10"))
+    cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
+    cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "10.0"))
     cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "60"))
 
     # Normalisation
-    zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))
-    min_regime_samples: int = int(os.getenv("MIN_REGIME_SAMPLES", "8"))
+    zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "20"))
+    min_regime_samples: int = int(os.getenv("MIN_REGIME_SAMPLES", "10"))
     min_cluster_frac: float = float(os.getenv("MIN_CLUSTER_FRAC", "0.05"))
 
     backtest_trade_size: float = float(os.getenv("BACKTEST_TRADE_SIZE", "0.02"))
