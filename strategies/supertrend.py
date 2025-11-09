@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from strategies.base import Strategy
@@ -36,13 +36,12 @@ class SuperTrendStrategy(Strategy):
         self.ind = indicator_engine
         self.sbuilder = signal_builder
         self.selector = factor_selector
-        self._cooldown_until: datetime | None = None
         self._trade_anchor_equity: float | None = None
         self._position_sign: int = 0
         self._entry_price_long: float | None = None
         self._entry_price_short: float | None = None
-        self._entry_equity: float | None = None
         self._last_executed_signal: int | None = None
+        self._invert_signal: bool = False
 
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
@@ -122,26 +121,22 @@ class SuperTrendStrategy(Strategy):
             self.logger.warning("数据不足以计算指标")
             return
 
-        now = datetime.utcnow()
-        if self._cooldown_until:
-            if now < self._cooldown_until:
-                remaining = (self._cooldown_until - now).total_seconds() / 60.0
-                self.logger.info('Cooldown active, %.1f min remaining', remaining)
-                return
-            self.logger.info('Cooldown finished, resuming trading')
-            self._cooldown_until = None
-
         best_factor = self.selector.maybe_select(df_atr)
         st = self.ind.compute_supertrend(df_atr, best_factor)
         sig_arr = self.sbuilder.build(df_atr, st)
-        current_signal = int(sig_arr[-1])
-        if self._last_executed_signal is None and current_signal != 0:
-            self.logger.info("Warmup phase: observing initial signal %s, awaiting reversal before first trade", current_signal)
-            self._last_executed_signal = current_signal
+        raw_signal = int(sig_arr[-1])
+        trade_signal = raw_signal if not self._invert_signal else -raw_signal
+        if self._last_executed_signal is None and trade_signal != 0:
+            self.logger.info(
+                "Warmup phase: observing initial signal %s, awaiting reversal before first trade",
+                trade_signal,
+            )
+            self._last_executed_signal = trade_signal
             return
-        if self._last_executed_signal is not None and current_signal == self._last_executed_signal:
-            self.logger.info("Signal %s unchanged, skip trade this cycle", current_signal)
+        if self._last_executed_signal is not None and trade_signal == self._last_executed_signal:
+            self.logger.info("Signal %s unchanged, skip trade this cycle", trade_signal)
             return
+        current_signal = trade_signal
         last_close = float(df_atr["Close"].iloc[-1])
 
         if self.cfg.use_macd_filter:
@@ -197,23 +192,15 @@ class SuperTrendStrategy(Strategy):
         equity = self.exec.account_equity()
         cooldown_loss_amount = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
         cooldown_loss_pct = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
-        cooldown_minutes = int(getattr(self.cfg, "cooldown_duration_minutes", 0))
         net_sign = 1 if long_amt > 0 else -1 if short_amt > 0 else 0
         if net_sign == 0:
             self._trade_anchor_equity = None
             self._position_sign = 0
-            self._entry_equity = None
         else:
             if self._position_sign != net_sign or self._trade_anchor_equity is None:
                 self._trade_anchor_equity = equity if equity > 0 else None
                 self._position_sign = net_sign
-                self._entry_equity = self._trade_anchor_equity
-        if (
-            net_sign != 0
-            and cooldown_minutes > 0
-            and self._trade_anchor_equity
-            and self._trade_anchor_equity > 0
-        ):
+        if net_sign != 0 and self._trade_anchor_equity and self._trade_anchor_equity > 0:
             loss_amount = self._trade_anchor_equity - equity
             trigger = False
             if cooldown_loss_amount > 0 and loss_amount >= cooldown_loss_amount:
@@ -222,17 +209,18 @@ class SuperTrendStrategy(Strategy):
                 loss_ratio = loss_amount / self._trade_anchor_equity
                 trigger = loss_ratio >= cooldown_loss_pct
             if trigger:
-                duration = max(1, cooldown_minutes)
+                self._invert_signal = not self._invert_signal
                 self.logger.error(
-                    "Single-trade loss %.2f USDT reached, cooldown %d minutes, flattening positions",
+                    "Single-trade loss %.2f USDT reached, switching mode (invert=%s) and flattening positions",
                     loss_amount,
-                    duration,
+                    self._invert_signal,
                 )
                 self._flatten_positions(long_amt, short_amt, last_close)
-                self._cooldown_until = datetime.utcnow() + timedelta(minutes=duration)
                 self._trade_anchor_equity = None
                 self._position_sign = 0
-                self._entry_equity = None
+                self._entry_price_long = None
+                self._entry_price_short = None
+                self._last_executed_signal = None
                 return
 
         anchor_equity = self._trade_anchor_equity or equity
