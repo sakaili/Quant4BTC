@@ -1,0 +1,177 @@
+//@version=5
+strategy("SuperTrend Strategy (Python Port)", overlay=true, initial_capital=500, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.00275, calc_on_every_tick=false, process_orders_on_close=true)
+// -------- Inputs matching config defaults --------
+atrLength      = input.int(5, "ATR Length", minval=1)
+factorMin      = input.float(2.0, "SuperTrend Multiplier", minval=0.1, step=0.1)
+bandEps        = input.float(0.0005, "Band Epsilon", minval=0.0, step=0.0001)
+signalConfirm  = input.int(1, "Signal Confirm Bars", minval=1)
+modeInput      = input.string("long_short", "Trading Mode", options=["long_short", "long_flat"])
+stopLossUsd    = input.float(2.0, "Stop Loss Amount (USD)", minval=0.0, step=0.1)
+qtyEquityMult  = input.float(1.5, "Order Size Multiple of Equity", minval=0.0, step=0.1)
+
+matchPythonInversion = input.bool(true, "Match Python Signal Inversion", tooltip="Python SignalBuilder returns signals multiplied by -1. Keep enabled to stay identical with the backtester. Disable if you want intuitive orientation (long when price is above the band).")
+
+// -------- Helper values --------
+hl2Value = (high + low) * 0.5
+prevClose = close[1]
+trueRange = math.max(math.max(high - low, math.abs(high - prevClose)), math.abs(low - prevClose))
+atr = ta.rma(trueRange, atrLength)
+
+factor = factorMin
+
+// -------- SuperTrend port --------
+var float stUpper = na
+var float stLower = na
+var float stOutput = na
+var int stTrend = na
+
+if not na(atr)
+    upBasic = hl2Value + factor * atr
+    dnBasic = hl2Value - factor * atr
+    prevUpper = na(stUpper[1]) ? upBasic : stUpper[1]
+    prevLower = na(stLower[1]) ? dnBasic : stLower[1]
+    prevTrend = na(stTrend[1]) ? (close > hl2Value ? 1 : 0) : stTrend[1]
+    trend = prevTrend
+    if close > prevUpper
+        trend := 1
+    else if close < prevLower
+        trend := 0
+
+    upper = trend == 1 ? math.min(upBasic, prevUpper) : upBasic
+    lower = trend == 1 ? dnBasic : math.max(dnBasic, prevLower)
+    output = trend == 1 ? lower : upper
+
+    stUpper := upper
+    stLower := lower
+    stOutput := output
+    stTrend := trend
+else
+    stUpper := na
+    stLower := na
+    stOutput := na
+    stTrend := na
+
+// -------- Signal builder port --------
+var int rawSignal = na
+var int upCount = 0
+var int dnCount = 0
+
+modeLongFlat = modeInput == "long_flat"
+prevOutput = nz(stOutput[1], stOutput)
+isLongCond = close > prevOutput * (1.0 + bandEps)
+isShortCond = close < prevOutput * (1.0 - bandEps)
+
+if na(stOutput)
+    rawSignal := na
+else
+    if barstate.isfirst
+        rawSignal := modeLongFlat ? (close > stOutput ? 1 : 0) : (close >= stOutput ? 1 : -1)
+        upCount := 0
+        dnCount := 0
+    else
+        prevSignal = nz(rawSignal[1], modeLongFlat ? (close > prevOutput ? 1 : 0) : (close >= prevOutput ? 1 : -1))
+        up = upCount
+        dn = dnCount
+        if isLongCond
+            up += 1
+            dn := 0
+        else if isShortCond
+            dn += 1
+            up := 0
+        else
+            up := math.max(up - 1, 0)
+            dn := math.max(dn - 1, 0)
+
+        nextSignal = prevSignal
+        if modeLongFlat
+            if prevSignal == 0 and up >= signalConfirm
+                nextSignal := 1
+                up := 0
+            else if prevSignal == 1 and dn >= signalConfirm
+                nextSignal := 0
+                dn := 0
+        else
+            if prevSignal <= 0 and up >= signalConfirm
+                nextSignal := 1
+                up := 0
+            else if prevSignal >= 0 and dn >= signalConfirm
+                nextSignal := -1
+                dn := 0
+
+        rawSignal := nextSignal
+        upCount := up
+        dnCount := dn
+
+signalSeries = matchPythonInversion ? (rawSignal * -1) : rawSignal
+filteredSignal = signalSeries
+
+// -------- Stop gating helper --------
+var bool waitForSignalFlip = false
+var int blockedDir = 0
+int signalDir = na(filteredSignal) ? 0 : filteredSignal > 0 ? 1 : filteredSignal < 0 ? -1 : 0
+
+if waitForSignalFlip
+    bool flipReady = (modeLongFlat and signalDir == 0) or (not modeLongFlat and signalDir == -blockedDir and signalDir != 0)
+    if flipReady
+        waitForSignalFlip := false
+        blockedDir := 0
+
+// -------- Position sizing helper --------
+equityNow = nz(strategy.equity, strategy.initial_capital)
+qtyCalc = (equityNow * qtyEquityMult) / close
+qtyCalc := math.max(qtyCalc, 0.0)
+
+enterLong = not na(filteredSignal) and filteredSignal == 1 and not waitForSignalFlip
+enterShort = not na(filteredSignal) and filteredSignal == -1 and not waitForSignalFlip
+flatten = not na(filteredSignal) and filteredSignal == 0
+
+if barstate.isnew
+    if modeLongFlat
+        if enterLong
+            strategy.entry("Long", strategy.long, qty=qtyCalc)
+        else if flatten or enterShort
+            strategy.close("Long")
+    else
+        if enterLong
+            strategy.close("Short")
+            strategy.entry("Long", strategy.long, qty=qtyCalc)
+        else if enterShort
+            strategy.close("Long")
+            strategy.entry("Short", strategy.short, qty=qtyCalc)
+        else if flatten
+            strategy.close("Long")
+            strategy.close("Short")
+
+// -------- Stop loss handling --------
+if stopLossUsd > 0 and strategy.position_size != 0
+    float entryPrice = strategy.position_avg_price
+    if not na(entryPrice)
+        qty = strategy.position_size
+        float profitUsd = (close - entryPrice) * qty * syminfo.pointvalue
+        hitStop = profitUsd <= -stopLossUsd
+        if hitStop
+            if qty > 0
+                strategy.close("Long", comment="StopLoss")
+                blockedDir := 1
+            else
+                strategy.close("Short", comment="StopLoss")
+                blockedDir := -1
+            waitForSignalFlip := true
+
+// -------- Plots --------
+plot(stOutput, title="SuperTrend", color=stTrend == 1 ? color.green : color.red, linewidth=2)
+plot(stUpper, title="SuperTrend Upper", color=color.red, linewidth=1, style=plot.style_linebr)
+plot(stLower, title="SuperTrend Lower", color=color.teal, linewidth=1, style=plot.style_linebr)
+plotshape(enterLong, title="Long Signal", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.tiny, text="L")
+plotshape(enterShort, title="Short Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.tiny, text="S")
+plotshape(flatten and not modeLongFlat, title="Flat Signal", location=location.bottom, color=color.yellow, style=shape.circle, size=size.tiny, text="F")
+
+// -------- Debug table --------
+var table info = table.new(position.bottom_right, 3, 2, bgcolor=color.new(color.black, 75))
+if barstate.islast
+    table.cell(info, 0, 0, text="Factor", text_color=color.white)
+    table.cell(info, 1, 0, str.tostring(factor, format.mintick), text_color=color.white)
+    table.cell(info, 0, 1, text="Signal", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(filteredSignal), text_color=color.white)
+    table.cell(info, 2, 0, text="WaitFlip", text_color=color.white)
+    table.cell(info, 2, 1, str.tostring(waitForSignalFlip), text_color=color.white)

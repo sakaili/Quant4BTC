@@ -11,13 +11,13 @@ class Config:
     """Centralised runtime configuration for strategies, execution, and backtests."""
 
     # Market configuration
-    symbol: str = os.getenv("CONTRACT_SYMBOL", "GIGGLE/USDC")
+    symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDC")
     timeframe: str = os.getenv("TIMEFRAME", "5m")
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "900"))
 
     # Trading model
     contracts_per_order: int = int(os.getenv("CONTRACTS_PER_ORDER", "10"))
-    fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "7.0"))
+    fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "0.01"))
 
     # Environment toggles
     use_demo: bool = os.getenv("USE_DEMO", "false").lower() in TRUE_SET
@@ -87,8 +87,8 @@ class Config:
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
     force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
     cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
-    cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "5.0"))
-    cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "30"))
+    cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "10.0"))
+    cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "60"))
 
     # Normalisation
     zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))
