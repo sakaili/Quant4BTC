@@ -71,7 +71,7 @@ class Config:
 
     # Logging
     csv_log_file: str = os.getenv("CSV_LOG_FILE", "trade_log.csv")
-    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "BTC/USDC,ETH/USDC")
+    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "GIGGLE/USDC")
 
     # Risk controls
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "500"))
