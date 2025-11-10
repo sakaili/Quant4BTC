@@ -127,12 +127,18 @@ class SuperTrendStrategy(Strategy):
         raw_signal = int(sig_arr[-1])
         trade_signal = raw_signal if not self._invert_signal else -raw_signal
         if self._last_executed_signal is None and trade_signal != 0:
-            self.logger.info(
-                "Warmup phase: observing initial signal %s, awaiting reversal before first trade",
-                trade_signal,
-            )
-            self._last_executed_signal = trade_signal
-            return
+            if self.cfg.allow_initial_position:
+                self.logger.info(
+                    "Initial signal %s detected, proceeding with initial position (allow_initial_position=True)",
+                    trade_signal,
+                )
+            else:
+                self.logger.info(
+                    "Warmup phase: observing initial signal %s, awaiting reversal before first trade",
+                    trade_signal,
+                )
+                self._last_executed_signal = trade_signal
+                return
         if self._last_executed_signal is not None and trade_signal == self._last_executed_signal:
             self.logger.info("Signal %s unchanged, skip trade this cycle", trade_signal)
             return
@@ -178,7 +184,8 @@ class SuperTrendStrategy(Strategy):
         factor_display = float(selection_info.get("factor") or best_factor)
 
         self.logger.info(
-            "信号:%s 因子:%.3f 来源:%s Close: %.2f MACD过滤:%s DIF:%s DEA:%s",
+            "[%s] 信号:%s 因子:%.3f 来源:%s 收盘价:%.4f MACD过滤:%s DIF:%s DEA:%s",
+            self.cfg.symbol,
             current_signal,
             factor_display,
             source_desc,
