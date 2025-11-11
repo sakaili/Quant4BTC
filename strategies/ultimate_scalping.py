@@ -157,18 +157,23 @@ class UltimateScalpingStrategy(Strategy):
             "[%s] ========== 指标详情 ==========",
             self.cfg.symbol
         )
-        self.logger.info("价格: Close=%.2f", last_close)
-        self.logger.info("EMA: Fast=%.2f Slow=%.2f (Fast>Slow=%s)",
-                        last_ema_fast, last_ema_slow, last_ema_fast > last_ema_slow)
-        self.logger.info("RSI: %.2f (Bull>55=%s, Bear<45=%s)",
-                        last_rsi, last_rsi > 55, last_rsi < 45)
-        self.logger.info("SuperTrend: Direction=%d Factor=%.3f Source=%s",
-                        last_st_direction, factor_display, source_desc)
-        self.logger.info("趋势判断: Up=%s Down=%s", trend_up, trend_down)
-        self.logger.info("穿越信号: CrossOver=%s CrossUnder=%s", crossover_up, crossunder_down)
-        self.logger.info("主信号: Long=%s Short=%s", long_condition, short_condition)
-        self.logger.info("重入信号: LongReentry=%s ShortReentry=%s", long_reentry, short_reentry)
-        self.logger.info("最终信号: %d (1=Long, -1=Short, 0=Flat)", current_signal)
+        self.logger.info("💰 价格: %.2f", last_close)
+        self.logger.info("📊 EMA: Fast=%.2f Slow=%.2f → %s",
+                        last_ema_fast, last_ema_slow,
+                        "上升" if last_ema_fast > last_ema_slow else "下降")
+        self.logger.info("📈 RSI: %.2f → %s",
+                        last_rsi,
+                        "强势" if last_rsi > 55 else ("弱势" if last_rsi < 45 else "中性"))
+        self.logger.info("🔀 SuperTrend: %s (Factor=%.3f, %s)",
+                        "上升" if last_st_direction == 1 else "下降",
+                        factor_display, source_desc)
+        self.logger.info("📍 综合趋势: %s",
+                        "多头" if trend_up else ("空头" if trend_down else "震荡"))
+        self.logger.info("🎯 主信号: %s | 重入: %s",
+                        ("做多" if long_condition else ("做空" if short_condition else "无")),
+                        ("做多" if long_reentry else ("做空" if short_reentry else "无")))
+        self.logger.info("⚡ 最终信号: %s",
+                        "🟢 做多" if current_signal == 1 else ("🔴 做空" if current_signal == -1 else "⚪ 空仓"))
         self.logger.info("===========================================")
 
         # 信号去重: 如果信号未变化则跳过交易
