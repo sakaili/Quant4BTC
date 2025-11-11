@@ -131,25 +131,7 @@ class UltimateScalpingStrategy(Strategy):
         else:
             current_signal = 0
 
-        # 信号去重: 如果信号未变化则跳过
-        if self._last_executed_signal is not None and current_signal == self._last_executed_signal:
-            self.logger.info(
-                "信号未变化 (signal=%d), 跳过交易 | RSI=%.2f EMA_fast=%.4f EMA_slow=%.4f",
-                current_signal, last_rsi, last_ema_fast, last_ema_slow
-            )
-            return
-
-        # 初始仓位处理
-        if self._last_executed_signal is None and current_signal != 0:
-            if not self.cfg.allow_initial_position:
-                self.logger.info(
-                    "预热阶段: 观察到初始信号 %s, 等待反转后才进行首次交易",
-                    current_signal
-                )
-                self._last_executed_signal = current_signal
-                return
-
-        # 获取因子选择信息
+        # 获取因子选择信息 (在日志输出前获取)
         selection_info = {}
         if hasattr(self.selector, "last_selection_info"):
             selection_info = self.selector.last_selection_info() or {}
@@ -170,7 +152,7 @@ class UltimateScalpingStrategy(Strategy):
 
         factor_display = float(selection_info.get("factor") or best_factor)
 
-        # ================== 详细日志输出 ==================
+        # ================== 详细日志输出 (每次都显示) ==================
         self.logger.info(
             "[%s] ========== 指标详情 ==========",
             self.cfg.symbol
@@ -188,6 +170,21 @@ class UltimateScalpingStrategy(Strategy):
         self.logger.info("重入信号: LongReentry=%s ShortReentry=%s", long_reentry, short_reentry)
         self.logger.info("最终信号: %d (1=Long, -1=Short, 0=Flat)", current_signal)
         self.logger.info("===========================================")
+
+        # 信号去重: 如果信号未变化则跳过交易
+        if self._last_executed_signal is not None and current_signal == self._last_executed_signal:
+            self.logger.info("⏭ 信号未变化 (signal=%d), 跳过交易", current_signal)
+            return
+
+        # 初始仓位处理
+        if self._last_executed_signal is None and current_signal != 0:
+            if not self.cfg.allow_initial_position:
+                self.logger.info(
+                    "🔄 预热阶段: 观察到初始信号 %s, 等待反转后才进行首次交易",
+                    current_signal
+                )
+                self._last_executed_signal = current_signal
+                return
 
         # ================== 仓位管理 ==================
 
