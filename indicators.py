@@ -100,10 +100,10 @@ class IndicatorEngine:
             else:
                 trend[i] = trend[i - 1]
             if trend[i] == 1:
-                upper[i] = min(up_basic, upper[i - 1])
-                lower[i] = dn_basic
-            else:
                 upper[i] = up_basic
                 lower[i] = max(dn_basic, lower[i - 1])
+            else:
+                upper[i] = min(up_basic, upper[i - 1])
+                lower[i] = dn_basic
             output[i] = lower[i] if trend[i] == 1 else upper[i]
         return {"trend": trend, "upper": upper, "lower": lower, "output": output, "factor": factor}
