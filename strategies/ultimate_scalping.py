@@ -292,13 +292,18 @@ class UltimateScalpingStrategy(Strategy):
 
             hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 止损单 (目前只支持止损单,止盈通过信号反转实现)
+            # 止损单
             self.exec.place_stop(
                 "sell", current_long, sl_price, hedge_ps, reduce_only=True
             )
 
+            # 止盈单
+            self.exec.place_take_profit(
+                "sell", current_long, tp_price, hedge_ps, reduce_only=True
+            )
+
             self.logger.info(
-                "Long SL=%.4f (%.2f%%) | TP目标=%.4f (%.2f%%)",
+                "Long SL=%.4f (%.2f%%) | TP=%.4f (%.2f%%)",
                 sl_price, stop_loss_pct, tp_price, take_profit_pct
             )
 
@@ -308,13 +313,18 @@ class UltimateScalpingStrategy(Strategy):
 
             hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 止损单 (目前只支持止损单,止盈通过信号反转实现)
+            # 止损单
             self.exec.place_stop(
                 "buy", current_short, sl_price, hedge_ps, reduce_only=True
             )
 
+            # 止盈单
+            self.exec.place_take_profit(
+                "buy", current_short, tp_price, hedge_ps, reduce_only=True
+            )
+
             self.logger.info(
-                "Short SL=%.4f (%.2f%%) | TP目标=%.4f (%.2f%%)",
+                "Short SL=%.4f (%.2f%%) | TP=%.4f (%.2f%%)",
                 sl_price, stop_loss_pct, tp_price, take_profit_pct
             )
 

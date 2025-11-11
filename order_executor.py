@@ -123,6 +123,25 @@ class OrderExecutor:
             self.logger.error(f"Stop order failed: {exc}")
             return {"status": "error", "reason": str(exc)}
 
+    def place_take_profit(self, side: str, amount: float, trigger_price: float, pos_side: str | None, reduce_only: bool = True):
+        """Place a take profit order."""
+        qty = self._normalise_amount(amount)
+        position_side = pos_side.lower().strip() if pos_side else None
+        try:
+            order = self.exch.create_take_profit_order(
+                side=side.lower().strip(),
+                amount=qty,
+                trigger_price=trigger_price,
+                pos_side=position_side,
+                reduce_only=reduce_only,
+            )
+            order_id = order.get("id", "")
+            self.logger.info(f"[Binance] take_profit order id={order_id} trigger={trigger_price:.6f}")
+            return {"status": "ok", "order_id": order_id}
+        except Exception as exc:
+            self.logger.error(f"Take profit order failed: {exc}")
+            return {"status": "error", "reason": str(exc)}
+
     def cancel_all_conditional(self):
         return self.exch.cancel_all_conditional_orders()
 

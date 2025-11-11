@@ -164,6 +164,32 @@ class ExchangeClient:
             params=params,
         )
 
+    def create_take_profit_order(
+        self,
+        side: str,
+        amount: float,
+        trigger_price: float,
+        pos_side: str | None,
+        reduce_only: bool = True,
+    ):
+        """Create a take profit market order (TAKE_PROFIT_MARKET type)."""
+        params: Dict[str, Any] = {
+            "stopPrice": float(self.price_to_precision(trigger_price)),
+            "workingType": "CONTRACT_PRICE",
+        }
+        hedge_params = self._hedge_side_param(pos_side)
+        params.update(hedge_params)
+        if reduce_only and not hedge_params:
+            params["reduceOnly"] = True
+        return self.exchange.create_order(
+            symbol=self.cfg.symbol,
+            type="TAKE_PROFIT_MARKET",
+            side=side,
+            amount=amount,
+            price=None,
+            params=params,
+        )
+
     def cancel_all_conditional_orders(self):
         try:
             cancelled = self.exchange.cancel_all_orders(self.cfg.symbol)
