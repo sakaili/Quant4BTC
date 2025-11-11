@@ -3,6 +3,13 @@ import logging
 import os
 from dataclasses import dataclass
 
+# Load environment variables from .env file if it exists
+try:
+    from env_loader import load_env
+    # load_env() is called automatically when env_loader is imported
+except ImportError:
+    print("⚠ env_loader not found, using system environment variables only")
+
 TRUE_SET = ("1", "true", "yes")
 
 
@@ -11,13 +18,13 @@ class Config:
     """Centralised runtime configuration for strategies, execution, and backtests."""
 
     # Market configuration
-    symbol: str = os.getenv("CONTRACT_SYMBOL", "GIGGLE/USDC")
-    timeframe: str = os.getenv("TIMEFRAME", "5m")
+    symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDC:USDC")
+    timeframe: str = os.getenv("TIMEFRAME", "1m")
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "900"))
 
     # Trading model
     contracts_per_order: int = int(os.getenv("CONTRACTS_PER_ORDER", "10"))
-    fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "7.0"))
+    fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "3"))
 
     # Environment toggles
     use_demo: bool = os.getenv("USE_DEMO", "false").lower() in TRUE_SET
@@ -60,6 +67,15 @@ class Config:
     macd_atr_max: float = float(os.getenv("MACD_ATR_MAX", "0.02"))
     macd_atr_stop_multiple: float = float(os.getenv("MACD_ATR_STOP_MULTIPLE", "2.0"))
 
+    # Ultimate Scalping Strategy parameters
+    ema_fast_length: int = int(os.getenv("EMA_FAST_LENGTH", "20"))
+    ema_slow_length: int = int(os.getenv("EMA_SLOW_LENGTH", "50"))
+    rsi_length: int = int(os.getenv("RSI_LENGTH", "14"))
+    supertrend_mult: float = float(os.getenv("SUPERTREND_MULT", "3.0"))
+    scalping_take_profit_pct: float = float(os.getenv("SCALPING_TAKE_PROFIT_PCT", "3.0"))
+    scalping_stop_loss_pct: float = float(os.getenv("SCALPING_STOP_LOSS_PCT", "1.5"))
+    scalping_reversal_exit: bool = os.getenv("SCALPING_REVERSAL_EXIT", "true").lower() in TRUE_SET
+
     # Risk mode
     mode: str = os.getenv("MODE", "long_short")  # long_flat / long_short
     rr: float = float(os.getenv("RR", "2.0"))
@@ -71,7 +87,7 @@ class Config:
 
     # Logging
     csv_log_file: str = os.getenv("CSV_LOG_FILE", "trade_log.csv")
-    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "GIGGLE/USDC")
+    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "BTC/USDC:USDC")
 
     # Risk controls
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "500"))
@@ -88,8 +104,8 @@ class Config:
     force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
     allow_initial_position: bool = os.getenv("ALLOW_INITIAL_POSITION", "true").lower() in TRUE_SET
     cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
-    cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "5.0"))
-    cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "15"))
+    cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "3.0"))
+    cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "0"))
 
     # Normalisation
     zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))

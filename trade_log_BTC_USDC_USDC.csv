@@ -1,0 +1,2 @@
+timestamp,signal,close,position,action,exec_price,fee,order_id,stop_loss,take_profit,best_factor,equity,mode
+2025-11-11 13:05:05.052236,0,105499.7,0,,,,,,,3.0,0.0,BINANCE-USDM-TEST

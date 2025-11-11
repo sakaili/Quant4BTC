@@ -1,6 +1,92 @@
 ﻿# quant4BTC
 
-面向 OKX 合约的 SuperTrend 自适应量化框架，围绕“一次拉取、一次评估、一次执行”的循环设计，便于扩展指标或切换执行环境。
+多策略加密货币量化交易框架,支持币安 (Binance) 合约交易。围绕"一次拉取、一次评估、一次执行"的循环设计,便于扩展指标或切换执行环境。
+
+## 特性
+
+- 🚀 **多策略支持**: SuperTrend 自适应策略、Ultimate Scalping 策略
+- 🔄 **灵活配置**: 支持 .env 文件、环境变量、系统配置
+- 🐧 **Ubuntu 部署**: 完整的 systemd 服务和自动部署脚本
+- 📊 **风险管理**: 内置止损、回撤控制、信号过滤
+- 📈 **多指标组合**: SuperTrend、EMA、RSI、MACD 等
+- 🔐 **安全**: 支持测试网、API 权限限制
+
+## 快速开始
+
+### 本地测试 (Windows/Mac/Linux)
+
+```bash
+# 1. 克隆项目
+git clone <your-repo>
+cd quant4BTC
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 配置环境
+cp .env.template .env
+nano .env  # 编辑配置
+
+# 4. 运行
+python main.py
+```
+
+### Ubuntu 服务器部署
+
+```bash
+# 1. 上传代码
+scp -r ./quant4BTC ubuntu@your-server:/home/ubuntu/
+
+# 2. SSH 登录并运行部署脚本
+ssh ubuntu@your-server
+cd /home/ubuntu/quant4BTC
+chmod +x deployment/deploy.sh
+./deployment/deploy.sh
+
+# 3. 查看状态
+sudo systemctl status quant4btc
+```
+
+📖 **详细部署指南**: [deployment/QUICKSTART.md](deployment/QUICKSTART.md)
+
+## 可用策略
+
+### 1. Ultimate Scalping Strategy
+结合 EMA 趋势、RSI 动量和 SuperTrend 的多空剥头皮策略。
+
+**特点**:
+- 多重信号确认 (EMA + RSI + SuperTrend)
+- 支持回调重入
+- 反向信号自动平仓
+- 适合 1-5 分钟级别短线交易
+
+**配置**:
+```bash
+STRATEGY_NAME=ultimate_scalping
+EMA_FAST_LENGTH=20
+EMA_SLOW_LENGTH=50
+RSI_LENGTH=14
+SCALPING_TAKE_PROFIT_PCT=3.0
+SCALPING_STOP_LOSS_PCT=1.5
+```
+
+📖 **详细说明**: [strategies/ultimate_scalping_README.md](strategies/ultimate_scalping_README.md)
+
+### 2. SuperTrend Adaptive Strategy
+基于 SuperTrend 指标的自适应策略,动态调整参数。
+
+**特点**:
+- 自适应因子选择 (KMeans 聚类)
+- 市场状态识别
+- MACD 过滤
+- 风险管理和回撤控制
+
+**配置**:
+```bash
+STRATEGY_NAME=supertrend
+SELECTION=regime_kmeans
+USE_MACD_FILTER=true
+```
 
 ## 架构与模块
 
@@ -17,47 +103,64 @@
 | order_executor.py | 封装开平仓及风险控制下单 |
 | csv_logger.py | 将每次执行结果追加写入 CSV |
 | strategies/base.py | 策略基类，封装循环调度与风险管理 |
-| strategies/supertrend.py | SuperTrend 策略实现，继承策略基类 |
+| strategies/supertrend.py | SuperTrend 策略实现 |
+| strategies/ultimate_scalping.py | Ultimate Scalping 策略实现 |
 | runner.py | 兼容旧接口，继续导出 SuperTrendStrategy |
 | main.py | 程序入口，装配通用组件并运行所选策略 |
+| env_loader.py | 环境变量加载器,支持 .env 文件 |
 
 ### 主循环概览
-1. DataFetcher 拉取行情，清理未收盘数据。  
-2. IndicatorEngine 生成 ATR/SuperTrend。  
-3. FactorSelector 决定当前使用的 SuperTrend 因子。  
-4. SignalBuilder 生成目标仓位，PositionReader 读取当前仓位。  
-5. OrderExecutor 触发必要的开平仓动作，并同步写入 CsvLogger。  
+1. DataFetcher 拉取行情，清理未收盘数据。
+2. IndicatorEngine 生成 ATR/SuperTrend/EMA/RSI。
+3. FactorSelector 决定当前使用的 SuperTrend 因子 (仅 SuperTrend 策略)。
+4. SignalBuilder 或策略内部逻辑生成交易信号。
+5. OrderExecutor 触发必要的开平仓动作，并同步写入 CsvLogger。
 6. Strategy.align_and_loop 通过对齐回调驱动主循环。
 
-## 环境准备
+## 环境配置
 
-### 依赖
-- Python 3.10+
-- pip install -r requirements.txt（若尚未创建，可手动安装：ccxt, pandas, 
-umpy）
+### 方式 1: .env 文件 (推荐)
 
-### 必需环境变量
+```bash
+# 复制模板
+cp .env.template .env
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| CONTRACT_SYMBOL | BTC/USDT:USDT | 交易合约 |
-| TIMEFRAME | 5m | K 线周期 |
-| FETCH_LIMIT | 900 | 拉取历史根数 |
-| CONTRACTS_PER_ORDER | 10 | 单次下单张数 |
-| USE_DEMO | 	rue | 是否使用沙盒环境 |
-| LOG_LEVEL | INFO | 日志等级 |
-| STRATEGY_NAME | supertrend | 选择策略实现（supertrend 等） |
-| OKX_API_KEY/SECRET/PASSWORD | 空 | OKX API 凭证 |
-| LEVERAGE | 5 | 杠杆倍数 |
-| MARGIN_MODE | cross | cross 或 isolated |
-| POSITION_MODE | hedge | hedge 或 
-et |
-| CSV_LOG_FILE | 	rade_log.csv | 交易日志文件 |
+# 编辑配置
+nano .env
+```
 
-更多指标、聚类与风控相关参数同样由 Config 读取，可根据需要覆写。
+### 方式 2: 环境变量
 
-### 代理
-若需走代理，设置 HTTP_PROXY / HTTPS_PROXY 即可，否则留空。
+```bash
+export STRATEGY_NAME=ultimate_scalping
+export BINANCE_API_KEY=your_key
+export BINANCE_SECRET=your_secret
+export USE_DEMO=true
+```
+
+### 必需配置
+
+```bash
+# 策略选择
+STRATEGY_NAME=ultimate_scalping  # 或 supertrend
+
+# 交易对
+CONTRACT_SYMBOL=BTC/USDT:USDT
+
+# API 凭证 (从币安获取)
+BINANCE_API_KEY=your_api_key
+BINANCE_SECRET=your_secret
+
+# 使用测试网 (强烈建议先测试)
+USE_DEMO=true
+
+# 仓位大小
+FIXED_ORDER_SIZE=3.0
+```
+
+📖 **完整配置说明**: [ENV_CONFIG.md](ENV_CONFIG.md)
+
+## 依赖安装
 
 ## 运行方式
 

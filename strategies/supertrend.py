@@ -200,6 +200,96 @@ class SuperTrendStrategy(Strategy):
         cooldown_loss_amount = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
         cooldown_loss_pct = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
         net_sign = 1 if long_amt > 0 else -1 if short_amt > 0 else 0
+
+        # 检测交易所止损单触发：之前有仓位，现在没了，且有亏损
+        exchange_stop_triggered = False
+        if net_sign == 0 and self._position_sign != 0 and self._trade_anchor_equity:
+            loss_amount = self._trade_anchor_equity - equity
+            if cooldown_loss_amount > 0 and loss_amount >= cooldown_loss_amount:
+                exchange_stop_triggered = True
+                prev_position_sign = self._position_sign
+                self.logger.error(
+                    "Exchange stop loss triggered! Loss: %.2f USDT, opening reverse position",
+                    loss_amount,
+                )
+            elif cooldown_loss_amount <= 0 and cooldown_loss_pct > 0:
+                loss_ratio = loss_amount / self._trade_anchor_equity
+                if loss_ratio >= cooldown_loss_pct:
+                    exchange_stop_triggered = True
+                    prev_position_sign = self._position_sign
+                    self.logger.error(
+                        "Exchange stop loss triggered! Loss: %.2f%%, opening reverse position",
+                        loss_ratio * 100,
+                    )
+
+        # 处理交易所止损单触发
+        if exchange_stop_triggered:
+            # 反转信号解释方式
+            self._invert_signal = not self._invert_signal
+
+            # 重置状态
+            self._trade_anchor_equity = None
+            self._position_sign = 0
+            self._entry_price_long = None
+            self._entry_price_short = None
+
+            # 立即开反手仓位
+            reverse_signal = -prev_position_sign
+            target_size = float(getattr(self.cfg, "fixed_order_size", 0.0))
+
+            if target_size > 0:
+                if reverse_signal > 0:
+                    resp = self.exec.open_long(target_size, last_close)
+                    if resp and resp.get("status") == "ok":
+                        fill_price = float(resp.get("price") or last_close)
+                        self._entry_price_long = fill_price
+                        self.logger.info("Opened LONG reverse position: size=%.4f price=%.4f", target_size, fill_price)
+                elif reverse_signal < 0:
+                    resp = self.exec.open_short(target_size, last_close)
+                    if resp and resp.get("status") == "ok":
+                        fill_price = float(resp.get("price") or last_close)
+                        self._entry_price_short = fill_price
+                        self.logger.info("Opened SHORT reverse position: size=%.4f price=%.4f", target_size, fill_price)
+
+                # 下新的止损单和反向开仓条件单
+                self.exec.cancel_all_conditional()
+                market_info = self.exec.market_info()
+                contract_value = float(market_info.get("contractSize") or market_info.get("ctVal") or 1.0)
+                loss_amount_cfg = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
+
+                if loss_amount_cfg > 0 and contract_value > 0 and target_size > 0:
+                    if reverse_signal > 0 and self._entry_price_long:
+                        delta = loss_amount_cfg / (target_size * contract_value)
+                        stop_price = max(0.0, self._entry_price_long - delta)
+                        hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+
+                        # 下止损单（平多仓）
+                        self.exec.place_stop("sell", target_size, stop_price, hedge_ps, reduce_only=True)
+                        self.logger.info("Placed LONG stop loss at %.4f", stop_price)
+
+                        # 下反向开仓条件单（开空仓）
+                        reverse_hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+                        self.exec.place_stop("sell", target_size, stop_price, reverse_hedge_ps, reduce_only=False)
+                        self.logger.info("Placed reverse SHORT open at %.4f", stop_price)
+
+                    elif reverse_signal < 0 and self._entry_price_short:
+                        delta = loss_amount_cfg / (target_size * contract_value)
+                        stop_price = max(0.0, self._entry_price_short + delta)
+                        hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+
+                        # 下止损单（平空仓）
+                        self.exec.place_stop("buy", target_size, stop_price, hedge_ps, reduce_only=True)
+                        self.logger.info("Placed SHORT stop loss at %.4f", stop_price)
+
+                        # 下反向开仓条件单（开多仓）
+                        reverse_hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+                        self.exec.place_stop("buy", target_size, stop_price, reverse_hedge_ps, reduce_only=False)
+                        self.logger.info("Placed reverse LONG open at %.4f", stop_price)
+
+            self._last_executed_signal = reverse_signal
+            return
+
+        # 正常的仓位追踪和止损检测（原有逻辑）
         if net_sign == 0:
             self._trade_anchor_equity = None
             self._position_sign = 0
@@ -216,19 +306,78 @@ class SuperTrendStrategy(Strategy):
                 loss_ratio = loss_amount / self._trade_anchor_equity
                 trigger = loss_ratio >= cooldown_loss_pct
             if trigger:
-                self._invert_signal = not self._invert_signal
                 self.logger.error(
-                    "Single-trade loss %.2f USDT reached, switching mode (invert=%s) and flattening positions",
+                    "Single-trade loss %.2f USDT reached, flattening and opening reverse position",
                     loss_amount,
-                    self._invert_signal,
                 )
                 self._flatten_positions(long_amt, short_amt, last_close)
+
+                # 反转信号解释方式，后续所有信号都会被反转
+                self._invert_signal = not self._invert_signal
+
+                # 重置状态，准备开新仓
                 self._trade_anchor_equity = None
                 self._position_sign = 0
                 self._entry_price_long = None
                 self._entry_price_short = None
-                self._last_executed_signal = None
-                return
+
+                # 立即开反手仓位：如果是多头止损，开空仓；如果是空头止损，开多仓
+                reverse_signal = -net_sign  # 反转信号：1变-1，-1变1
+                target_size = float(getattr(self.cfg, "fixed_order_size", 0.0))
+
+                if target_size > 0:
+                    if reverse_signal > 0:
+                        # 开多仓
+                        resp = self.exec.open_long(target_size, last_close)
+                        if resp and resp.get("status") == "ok":
+                            fill_price = float(resp.get("price") or last_close)
+                            self._entry_price_long = fill_price
+                            self.logger.info("Opened LONG position: size=%.4f price=%.4f", target_size, fill_price)
+                    elif reverse_signal < 0:
+                        # 开空仓
+                        resp = self.exec.open_short(target_size, last_close)
+                        if resp and resp.get("status") == "ok":
+                            fill_price = float(resp.get("price") or last_close)
+                            self._entry_price_short = fill_price
+                            self.logger.info("Opened SHORT position: size=%.4f price=%.4f", target_size, fill_price)
+
+                    # 下止损单和反向开仓条件单
+                    self.exec.cancel_all_conditional()
+                    market_info = self.exec.market_info()
+                    contract_value = float(market_info.get("contractSize") or market_info.get("ctVal") or 1.0)
+                    loss_amount_cfg = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
+
+                    if loss_amount_cfg > 0 and contract_value > 0 and target_size > 0:
+                        if reverse_signal > 0 and self._entry_price_long:
+                            delta = loss_amount_cfg / (target_size * contract_value)
+                            stop_price = max(0.0, self._entry_price_long - delta)
+                            hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+
+                            # 下止损单（平多仓）
+                            self.exec.place_stop("sell", target_size, stop_price, hedge_ps, reduce_only=True)
+                            self.logger.info("Placed LONG stop loss at %.4f", stop_price)
+
+                            # 下反向开仓条件单（开空仓）
+                            reverse_hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+                            self.exec.place_stop("sell", target_size, stop_price, reverse_hedge_ps, reduce_only=False)
+                            self.logger.info("Placed reverse SHORT open at %.4f", stop_price)
+
+                        elif reverse_signal < 0 and self._entry_price_short:
+                            delta = loss_amount_cfg / (target_size * contract_value)
+                            stop_price = max(0.0, self._entry_price_short + delta)
+                            hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+
+                            # 下止损单（平空仓）
+                            self.exec.place_stop("buy", target_size, stop_price, hedge_ps, reduce_only=True)
+                            self.logger.info("Placed SHORT stop loss at %.4f", stop_price)
+
+                            # 下反向开仓条件单（开多仓）
+                            reverse_hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+                            self.exec.place_stop("buy", target_size, stop_price, reverse_hedge_ps, reduce_only=False)
+                            self.logger.info("Placed reverse LONG open at %.4f", stop_price)
+
+                self._last_executed_signal = reverse_signal
+                return  # 止损反手后直接返回，不继续执行后续逻辑
 
         anchor_equity = self._trade_anchor_equity or equity
         unrealized_pct = (
@@ -343,7 +492,16 @@ class SuperTrendStrategy(Strategy):
                     delta = loss_amount_cfg / denom
                     stop_price = max(0.0, self._entry_price_long - delta)
                     hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-                    self.exec.place_stop("sell", current_long, stop_price, hedge_ps)
+
+                    # 下止损单（平多仓）
+                    self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
+                    self.logger.info("Placed LONG stop loss at %.4f", stop_price)
+
+                    # 下反向开仓条件单（开空仓）
+                    reverse_hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+                    self.exec.place_stop("sell", current_long, stop_price, reverse_hedge_ps, reduce_only=False)
+                    self.logger.info("Placed reverse SHORT open at %.4f", stop_price)
+
                     placed_stop = True
             elif current_short > 0 and self._entry_price_short:
                 denom = current_short * contract_value
@@ -351,17 +509,26 @@ class SuperTrendStrategy(Strategy):
                     delta = loss_amount_cfg / denom
                     stop_price = max(0.0, self._entry_price_short + delta)
                     hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-                    self.exec.place_stop("buy", current_short, stop_price, hedge_ps)
+
+                    # 下止损单（平空仓）
+                    self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
+                    self.logger.info("Placed SHORT stop loss at %.4f", stop_price)
+
+                    # 下反向开仓条件单（开多仓）
+                    reverse_hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
+                    self.exec.place_stop("buy", current_short, stop_price, reverse_hedge_ps, reduce_only=False)
+                    self.logger.info("Placed reverse LONG open at %.4f", stop_price)
+
                     placed_stop = True
         if not placed_stop and pct_stop > 0:
             if current_long > 0 and self._entry_price_long:
                 stop_price = max(0.0, self._entry_price_long * (1.0 - pct_stop))
                 hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-                self.exec.place_stop("sell", current_long, stop_price, hedge_ps)
+                self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
             elif current_short > 0 and self._entry_price_short:
                 stop_price = max(0.0, self._entry_price_short * (1.0 + pct_stop))
                 hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-                self.exec.place_stop("buy", current_short, stop_price, hedge_ps)
+                self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
 
         action_str = "|".join(actions) if actions else None
         exec_price = prices[-1] if prices else None

@@ -104,7 +104,7 @@ class OrderExecutor:
             self.logger.exception(f"[Binance] market order failed: {exc}")
             return {"status": "error", "reason": str(exc)}
 
-    def place_stop(self, side: str, amount: float, trigger_price: float, pos_side: str | None):
+    def place_stop(self, side: str, amount: float, trigger_price: float, pos_side: str | None, reduce_only: bool = True):
         qty = self._normalise_amount(amount)
         position_side = pos_side.lower().strip() if pos_side else None
         try:
@@ -113,9 +113,11 @@ class OrderExecutor:
                 amount=qty,
                 trigger_price=trigger_price,
                 pos_side=position_side,
+                reduce_only=reduce_only,
             )
             order_id = order.get("id", "")
-            self.logger.info(f"[Binance] stop order id={order_id} trigger={trigger_price:.6f}")
+            order_type = "stop_loss" if reduce_only else "stop_reverse"
+            self.logger.info(f"[Binance] {order_type} order id={order_id} trigger={trigger_price:.6f}")
             return {"status": "ok", "order_id": order_id}
         except Exception as exc:
             self.logger.error(f"Stop order failed: {exc}")

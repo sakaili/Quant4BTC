@@ -60,6 +60,20 @@ class IndicatorEngine:
         macd_df['Histogram'] = hist
         return macd_df
 
+    def compute_rsi(self, series: pd.Series, length: int = 14) -> pd.Series:
+        """计算相对强弱指标 RSI。"""
+        period = max(1, int(length))
+        delta = series.diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+
+        avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+
+        rs = avg_gain / avg_loss
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        return rsi
+
     def compute_supertrend(self, df_atr: pd.DataFrame, factor: float) -> dict:
         """基于 ATR 平台生成 SuperTrend 上下轨、趋势状态等结果。"""
         c = df_atr["Close"].to_numpy()

@@ -1,0 +1,20 @@
+# Quant4BTC Trading Bot - Python Dependencies
+
+# Core exchange connectivity
+ccxt>=4.0.0
+
+# Data processing
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# Machine learning (for clustering/factor selection)
+scikit-learn>=1.2.0
+
+# Optional: Enhanced logging
+# colorlog>=6.7.0
+
+# Optional: Performance monitoring
+# psutil>=5.9.0

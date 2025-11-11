@@ -145,6 +145,7 @@ class ExchangeClient:
         amount: float,
         trigger_price: float,
         pos_side: str | None,
+        reduce_only: bool = True,
     ):
         params: Dict[str, Any] = {
             "stopPrice": float(self.price_to_precision(trigger_price)),
@@ -152,7 +153,7 @@ class ExchangeClient:
         }
         hedge_params = self._hedge_side_param(pos_side)
         params.update(hedge_params)
-        if not hedge_params:
+        if reduce_only and not hedge_params:
             params["reduceOnly"] = True
         return self.exchange.create_order(
             symbol=self.cfg.symbol,

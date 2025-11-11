@@ -16,10 +16,12 @@ from position_reader import PositionReader
 from selector import FactorSelector
 from signals import SignalBuilder
 from strategies.supertrend import SuperTrendStrategy
+from strategies.ultimate_scalping import UltimateScalpingStrategy
 
 
 STRATEGY_REGISTRY = {
     "supertrend": SuperTrendStrategy,
+    "ultimate_scalping": UltimateScalpingStrategy,
 }
 
 

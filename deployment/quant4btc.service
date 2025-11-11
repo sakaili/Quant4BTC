@@ -1,0 +1,32 @@
+[Unit]
+Description=Quant4BTC Trading Bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/quant4BTC
+Environment="PATH=/home/ubuntu/quant4BTC/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/ubuntu/quant4BTC/venv/bin/python /home/ubuntu/quant4BTC/main.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/home/ubuntu/quant4BTC/logs/bot.log
+StandardError=append:/home/ubuntu/quant4BTC/logs/bot.error.log
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/quant4BTC/logs /home/ubuntu/quant4BTC/trade_log*.csv
+
+[Install]
+WantedBy=multi-user.target
