@@ -170,19 +170,24 @@ class UltimateScalpingStrategy(Strategy):
 
         factor_display = float(selection_info.get("factor") or best_factor)
 
-        # 记录信号详情
+        # ================== 详细日志输出 ==================
         self.logger.info(
-            "[%s] 信号:%s 因子:%.3f 来源:%s 收盘价:%.4f RSI:%.2f EMA_fast:%.4f EMA_slow:%.4f ST_trend:%d",
-            self.cfg.symbol,
-            current_signal,
-            factor_display,
-            source_desc,
-            last_close,
-            last_rsi,
-            last_ema_fast,
-            last_ema_slow,
-            last_st_direction,
+            "[%s] ========== 指标详情 ==========",
+            self.cfg.symbol
         )
+        self.logger.info("价格: Close=%.2f", last_close)
+        self.logger.info("EMA: Fast=%.2f Slow=%.2f (Fast>Slow=%s)",
+                        last_ema_fast, last_ema_slow, last_ema_fast > last_ema_slow)
+        self.logger.info("RSI: %.2f (Bull>55=%s, Bear<45=%s)",
+                        last_rsi, last_rsi > 55, last_rsi < 45)
+        self.logger.info("SuperTrend: Direction=%d Factor=%.3f Source=%s",
+                        last_st_direction, factor_display, source_desc)
+        self.logger.info("趋势判断: Up=%s Down=%s", trend_up, trend_down)
+        self.logger.info("穿越信号: CrossOver=%s CrossUnder=%s", crossover_up, crossunder_down)
+        self.logger.info("主信号: Long=%s Short=%s", long_condition, short_condition)
+        self.logger.info("重入信号: LongReentry=%s ShortReentry=%s", long_reentry, short_reentry)
+        self.logger.info("最终信号: %d (1=Long, -1=Short, 0=Flat)", current_signal)
+        self.logger.info("===========================================")
 
         # ================== 仓位管理 ==================
 
@@ -205,23 +210,26 @@ class UltimateScalpingStrategy(Strategy):
         take_profit_pct = self.cfg.scalping_take_profit_pct
         stop_loss_pct = self.cfg.scalping_stop_loss_pct
 
-        # 计算目标仓位
+        # 计算目标仓位 (Pine Script逻辑: 只在空仓时开仓)
         target_contracts = float(self.cfg.fixed_order_size)
 
         desired_long = desired_short = 0
-        if current_signal == 1:
+
+        # 多头信号: 只在无空仓时开多仓
+        if current_signal == 1 and short_amt == 0:
             desired_long = target_contracts
-        elif current_signal == -1:
+        # 空头信号: 只在无多仓时开空仓
+        elif current_signal == -1 and long_amt == 0:
             desired_short = target_contracts
 
-        # 反向平仓逻辑
+        # 反向平仓逻辑 (按Pine Script: reversal_exit)
         if self.cfg.scalping_reversal_exit:
             if current_signal == 1 and short_amt > 0:
-                self.logger.info("检测到多头信号, 平掉空头仓位 (反向平仓)")
+                self.logger.info("检测到多头信号, 平掉空头仓位")
                 self.exec.close_short(short_amt, last_close)
                 short_amt = 0
             elif current_signal == -1 and long_amt > 0:
-                self.logger.info("检测到空头信号, 平掉多头仓位 (反向平仓)")
+                self.logger.info("检测到空头信号, 平掉多头仓位")
                 self.exec.close_long(long_amt, last_close)
                 long_amt = 0
 
@@ -284,6 +292,7 @@ class UltimateScalpingStrategy(Strategy):
 
         # ================== 设置止盈止损 ==================
 
+        self.logger.info("[止盈止损] 取消所有挂单...")
         self.exec.cancel_all_conditional()
 
         if current_long > 0 and self._entry_price_long:
@@ -292,20 +301,26 @@ class UltimateScalpingStrategy(Strategy):
 
             hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 止损单
-            self.exec.place_stop(
-                "sell", current_long, sl_price, hedge_ps, reduce_only=True
-            )
-
-            # 止盈单
-            self.exec.place_take_profit(
-                "sell", current_long, tp_price, hedge_ps, reduce_only=True
-            )
-
             self.logger.info(
-                "Long SL=%.4f (%.2f%%) | TP=%.4f (%.2f%%)",
+                "[止盈止损] 多头仓位: 入场价=%.2f 数量=%.4f",
+                self._entry_price_long, current_long
+            )
+            self.logger.info(
+                "[止盈止损] 止损价=%.2f (%.2f%%) | 止盈价=%.2f (%.2f%%)",
                 sl_price, stop_loss_pct, tp_price, take_profit_pct
             )
+
+            # 止损单
+            sl_resp = self.exec.place_stop(
+                "sell", current_long, sl_price, hedge_ps, reduce_only=True
+            )
+            self.logger.info("[止盈止损] 止损单状态: %s", sl_resp.get("status"))
+
+            # 止盈单
+            tp_resp = self.exec.place_take_profit(
+                "sell", current_long, tp_price, hedge_ps, reduce_only=True
+            )
+            self.logger.info("[止盈止损] 止盈单状态: %s", tp_resp.get("status"))
 
         if current_short > 0 and self._entry_price_short:
             tp_price = self._entry_price_short * (1.0 - take_profit_pct / 100.0)
@@ -313,20 +328,26 @@ class UltimateScalpingStrategy(Strategy):
 
             hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 止损单
-            self.exec.place_stop(
-                "buy", current_short, sl_price, hedge_ps, reduce_only=True
-            )
-
-            # 止盈单
-            self.exec.place_take_profit(
-                "buy", current_short, tp_price, hedge_ps, reduce_only=True
-            )
-
             self.logger.info(
-                "Short SL=%.4f (%.2f%%) | TP=%.4f (%.2f%%)",
+                "[止盈止损] 空头仓位: 入场价=%.2f 数量=%.4f",
+                self._entry_price_short, current_short
+            )
+            self.logger.info(
+                "[止盈止损] 止损价=%.2f (%.2f%%) | 止盈价=%.2f (%.2f%%)",
                 sl_price, stop_loss_pct, tp_price, take_profit_pct
             )
+
+            # 止损单
+            sl_resp = self.exec.place_stop(
+                "buy", current_short, sl_price, hedge_ps, reduce_only=True
+            )
+            self.logger.info("[止盈止损] 止损单状态: %s", sl_resp.get("status"))
+
+            # 止盈单
+            tp_resp = self.exec.place_take_profit(
+                "buy", current_short, tp_price, hedge_ps, reduce_only=True
+            )
+            self.logger.info("[止盈止损] 止盈单状态: %s", tp_resp.get("status"))
 
         # ================== 记录日志 ==================
 
