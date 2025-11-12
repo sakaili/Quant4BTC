@@ -62,4 +62,4 @@ class SignalBuilder:
                     dn = 0
                 else:
                     sig[i] = sig[i - 1]
-        return sig * -1
+        return sig * 1

@@ -20,7 +20,7 @@ class OrderExecutor:
         balance = self.exch.fetch_balance_swap()
         if not balance:
             return {"equity": 0.0, "free": 0.0, "used": 0.0}
-        quote_ccy = self.cfg.symbol.split("/")[-1].upper()
+        quote_ccy = self.cfg.symbol.split("/")[-1].split(":")[0].upper()
         try:
             free = float(balance["free"].get(quote_ccy, 0.0))
             used = float(balance["used"].get(quote_ccy, 0.0))

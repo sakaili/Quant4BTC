@@ -376,6 +376,7 @@ class UltimateScalpingStrategy(Strategy):
         self.csv.append(
             {
                 "timestamp": datetime.now(),
+                "symbol": self.cfg.symbol,
                 "signal": current_signal,
                 "close": last_close,
                 "position": self.pos_reader.net_sign(),

@@ -91,7 +91,7 @@ class Config:
 
     # Logging
     csv_log_file: str = os.getenv("CSV_LOG_FILE", "trade_log.csv")
-    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "BTC/USDC:USDC")
+    symbols_env: str = os.getenv("CONTRACT_SYMBOLS", "BTC/USDC:USDC,ETH/USDC:USDC,SOL/USDC:USDC,BNB/USDC:USDC")
 
     # Risk controls
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "500"))
@@ -106,7 +106,7 @@ class Config:
     factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "1"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
     force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
-    allow_initial_position: bool = os.getenv("ALLOW_INITIAL_POSITION", "false").lower() in TRUE_SET
+    allow_initial_position: bool = os.getenv("ALLOW_INITIAL_POSITION", "true").lower() in TRUE_SET
     cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
     cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "3.0"))
     cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "0"))

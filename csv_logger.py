@@ -16,7 +16,7 @@ class CsvLogger:
         """若文件不存在或为空，则写入标准表头。"""
         if (not os.path.exists(self.path)) or (os.path.getsize(self.path) == 0):
             pd.DataFrame(columns=[
-                'timestamp', 'signal', 'close', 'position', 'action', 'exec_price', 'fee',
+                'timestamp', 'symbol', 'signal', 'close', 'position', 'action', 'exec_price', 'fee',
                 'order_id', 'stop_loss', 'take_profit', 'best_factor', 'equity', 'mode'
             ]).to_csv(self.path, index=False)
 
