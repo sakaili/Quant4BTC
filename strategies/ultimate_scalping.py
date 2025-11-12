@@ -212,8 +212,22 @@ class UltimateScalpingStrategy(Strategy):
         take_profit_pct = self.cfg.scalping_take_profit_pct
         stop_loss_pct = self.cfg.scalping_stop_loss_pct
 
-        # 计算目标仓位 (Pine Script逻辑: 只在空仓时开仓)
-        target_contracts = float(self.cfg.fixed_order_size)
+        # 计算目标仓位 - 支持固定和百分比模式
+        if self.cfg.position_sizing_mode == "percentage":
+            # 百分比模式: 使用账户净值的固定百分比
+            position_value = equity * self.cfg.position_size_pct
+            target_contracts = position_value / last_close
+            self.logger.info(
+                "📊 仓位计算: 净值=%.2f USDC × %.1f%% = %.2f USDC → %.6f BTC",
+                equity, self.cfg.position_size_pct * 100, position_value, target_contracts
+            )
+        else:
+            # 固定模式: 使用固定数量
+            target_contracts = float(self.cfg.fixed_order_size)
+            self.logger.info(
+                "📊 仓位计算: 固定模式 %.6f BTC (价值 %.2f USDC)",
+                target_contracts, target_contracts * last_close
+            )
 
         desired_long = desired_short = 0
 

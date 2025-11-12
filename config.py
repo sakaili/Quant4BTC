@@ -18,13 +18,17 @@ class Config:
     """Centralised runtime configuration for strategies, execution, and backtests."""
 
     # Market configuration
-    symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDT:USDT")
+    symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDC:USDC")
     timeframe: str = os.getenv("TIMEFRAME", "30m")
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "900"))
 
     # Trading model
     contracts_per_order: int = int(os.getenv("CONTRACTS_PER_ORDER", "10"))
     fixed_order_size: float = float(os.getenv("FIXED_ORDER_SIZE", "0.01"))
+
+    # Position sizing mode: 'fixed' or 'percentage'
+    position_sizing_mode: str = os.getenv("POSITION_SIZING_MODE", "percentage")
+    position_size_pct: float = float(os.getenv("POSITION_SIZE_PCT", "0.15"))  # 15% of equity per trade
 
     # Environment toggles
     use_demo: bool = os.getenv("USE_DEMO", "false").lower() in TRUE_SET
