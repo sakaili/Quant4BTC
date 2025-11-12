@@ -317,6 +317,10 @@ class UltimateScalpingStrategy(Strategy):
         self.logger.info("[止盈止损] 取消所有挂单...")
         self.exec.cancel_all_conditional()
 
+        # 初始化止盈止损价格变量（用于CSV记录）
+        sl_price = None
+        tp_price = None
+
         if current_long > 0 and self._entry_price_long:
             tp_price = self._entry_price_long * (1.0 + take_profit_pct / 100.0)
             sl_price = self._entry_price_long * (1.0 - stop_loss_pct / 100.0)
