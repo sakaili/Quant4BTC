@@ -86,10 +86,19 @@ def main():
     while True:
         cycle_start = time.time()
 
+        # 在周期开始时读取一次净值，所有品种共享此快照
+        try:
+            # 使用第一个策略的executor读取净值（所有品种共享同一个账户）
+            shared_equity = strategies[0][1].exec.account_equity()
+            base_logger.info(f"📊 周期净值快照: {shared_equity:.2f} USDC (所有品种共享)")
+        except Exception as e:
+            base_logger.error(f"读取账户净值失败: {e}", exc_info=True)
+            shared_equity = None  # 失败时传递None，策略会自行读取
+
         for symbol, strategy in strategies:
             try:
                 base_logger.info(f"========== 执行 {symbol} ==========")
-                strategy.run_once()
+                strategy.run_once(equity=shared_equity)
             except Exception as e:
                 base_logger.error(f"[{symbol}] 执行失败: {e}", exc_info=True)
 

@@ -49,7 +49,7 @@ class UltimateScalpingStrategy(Strategy):
         self._entry_price_long: float | None = None
         self._entry_price_short: float | None = None
 
-    def run_once(self) -> None:
+    def run_once(self, equity: float | None = None) -> None:
         df = self.fetcher.fetch_ohlcv_df()
         if df.empty:
             self.logger.warning("未获取到数据,跳过")
@@ -194,7 +194,13 @@ class UltimateScalpingStrategy(Strategy):
         # ================== 仓位管理 ==================
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
-        equity = self.exec.account_equity()
+
+        # 使用传入的净值参数（多品种模式下共享快照），或自行读取（单品种模式/向后兼容）
+        if equity is None:
+            equity = self.exec.account_equity()
+            self.logger.debug("未传入净值参数，自行读取账户净值")
+        else:
+            self.logger.debug("使用周期开始时的净值快照: %.2f USDC", equity)
 
         # 风控检查
         drawdown_state = self._assess_drawdown(equity)

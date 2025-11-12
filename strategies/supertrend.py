@@ -109,7 +109,7 @@ class SuperTrendStrategy(Strategy):
             return 0.0
         return contracts
 
-    def run_once(self) -> None:
+    def run_once(self, equity: float | None = None) -> None:
         df = self.fetcher.fetch_ohlcv_df()
         if df.empty:
             self.logger.warning("未获取到数据，跳过")
@@ -196,7 +196,11 @@ class SuperTrendStrategy(Strategy):
         )
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
-        equity = self.exec.account_equity()
+
+        # 使用传入的净值参数（多品种模式下共享快照），或自行读取（单品种模式/向后兼容）
+        if equity is None:
+            equity = self.exec.account_equity()
+
         cooldown_loss_amount = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
         cooldown_loss_pct = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
         net_sign = 1 if long_amt > 0 else -1 if short_amt > 0 else 0

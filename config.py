@@ -19,7 +19,7 @@ class Config:
 
     # Market configuration
     symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDC:USDC")
-    timeframe: str = os.getenv("TIMEFRAME", "30m")
+    timeframe: str = os.getenv("TIMEFRAME", "15m")
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "900"))
 
     # Trading model
