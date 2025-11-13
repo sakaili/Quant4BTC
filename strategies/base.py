@@ -66,7 +66,7 @@ class Strategy(ABC):
 
         overall_floor = self.cfg.initial_capital * (1.0 - self.cfg.overall_drawdown_limit)
         if equity <= overall_floor:
-            self._global_kill = True
+            self._global_kill = False
             return "overall"
 
         if self._daily_suspend_until and now < self._daily_suspend_until:
