@@ -19,7 +19,7 @@ class Config:
 
     # Market configuration
     symbol: str = os.getenv("CONTRACT_SYMBOL", "BTC/USDC:USDC")
-    timeframe: str = os.getenv("TIMEFRAME", "15m")
+    timeframe: str = os.getenv("TIMEFRAME", "5m")
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "900"))
 
     # Trading model
@@ -28,12 +28,12 @@ class Config:
 
     # Position sizing mode: 'fixed' or 'percentage'
     position_sizing_mode: str = os.getenv("POSITION_SIZING_MODE", "percentage")
-    position_size_pct: float = float(os.getenv("POSITION_SIZE_PCT", "0.15"))  # 15% of equity per trade
+    position_size_pct: float = float(os.getenv("POSITION_SIZE_PCT", "0.1"))  # 10% position for live testing (1x leverage)
 
     # Environment toggles
     use_demo: bool = os.getenv("USE_DEMO", "false").lower() in TRUE_SET
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    strategy_name: str = os.getenv("STRATEGY_NAME", "ultimate_scalping")
+    strategy_name: str = "supertrend"  # Hardcoded to match backtest
     use_macd_filter: bool = os.getenv("USE_MACD_FILTER", "false").lower() in TRUE_SET
 
     # Proxy settings
@@ -76,8 +76,8 @@ class Config:
     ema_slow_length: int = int(os.getenv("EMA_SLOW_LENGTH", "50"))
     rsi_length: int = int(os.getenv("RSI_LENGTH", "14"))
     supertrend_mult: float = float(os.getenv("SUPERTREND_MULT", "3.0"))
-    scalping_take_profit_pct: float = float(os.getenv("SCALPING_TAKE_PROFIT_PCT", "3.0"))
-    scalping_stop_loss_pct: float = float(os.getenv("SCALPING_STOP_LOSS_PCT", "1.5"))
+    scalping_take_profit_pct: float = 0.2  # Hardcoded: 0.2% price TP = 2% account profit (10x leverage)
+    scalping_stop_loss_pct: float = 0.1  # Hardcoded: 0.1% price SL = 1% account loss (10x leverage)
     scalping_reversal_exit: bool = os.getenv("SCALPING_REVERSAL_EXIT", "true").lower() in TRUE_SET
 
     # Risk mode
@@ -98,14 +98,22 @@ class Config:
     risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.1"))
     daily_drawdown_limit: float = float(os.getenv("DAILY_DRAWDOWN_LIMIT", "0.10"))
     overall_drawdown_limit: float = float(os.getenv("OVERALL_DRAWDOWN_LIMIT", "0.30"))
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.5"))
+
+    # Fixed percentage stop-loss and take-profit
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.01"))  # 1% stop-loss
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.02"))  # 2% take-profit
+    use_take_profit: bool = os.getenv("USE_TAKE_PROFIT", "true").lower() in TRUE_SET
+
+    # Time-based stop-loss
+    enable_time_stop: bool = os.getenv("ENABLE_TIME_STOP", "true").lower() in TRUE_SET
+    max_position_duration_hours: float = float(os.getenv("MAX_POSITION_DURATION_HOURS", "12"))  # 12 hours to avoid stuck positions
 
     # Signal controls
     signal_confirm: int = int(os.getenv("SIGNAL_CONFIRM", "1"))
     band_eps: float = float(os.getenv("BAND_EPS", "0.0005"))
-    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "1"))
+    factor_hold_bars: int = int(os.getenv("FACTOR_HOLD_BARS", "4"))
     factor_sticky: float = float(os.getenv("FACTOR_STICKY", "0.1"))
-    force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "true").lower() in TRUE_SET
+    force_factor_recalc: bool = os.getenv("FORCE_FACTOR_RECALC", "false").lower() in TRUE_SET
     allow_initial_position: bool = os.getenv("ALLOW_INITIAL_POSITION", "true").lower() in TRUE_SET
     cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
     cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "3.0"))

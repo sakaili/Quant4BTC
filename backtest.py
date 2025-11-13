@@ -113,7 +113,7 @@ class _ProgressPrinter:
             sys.stdout.flush()
 
 
-def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -> dict[str, np.ndarray | float]:
+def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config, atr: np.ndarray | None = None) -> dict[str, np.ndarray | float]:
     close_arr = np.asarray(close, dtype=float)
     signal_arr = np.asarray(signal, dtype=float)
     if close_arr.shape != signal_arr.shape:
@@ -125,6 +125,22 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
     slippage = max(0.0, float(getattr(cfg, "slippage_rate", 0.0)))
     turnover_penalty = max(0.0, float(getattr(cfg, "turnover_penalty", 0.0)))
     initial_capital = float(getattr(cfg, "initial_capital", 0.0))
+
+    # Stop-loss configuration
+    stop_loss_pct = float(getattr(cfg, "stop_loss_pct", 0.008))  # 0.8%
+    take_profit_pct = float(getattr(cfg, "take_profit_pct", 0.016))  # 1.6%
+    use_take_profit = getattr(cfg, "use_take_profit", True)
+    enable_time_stop = getattr(cfg, "enable_time_stop", False)
+    max_position_duration_hours = float(getattr(cfg, "max_position_duration_hours", 24))
+
+    # Get timeframe for duration calculation
+    timeframe = getattr(cfg, "timeframe", "15m")
+    bars_per_hour = 60 / int(timeframe.replace("m", "").replace("h", ""))
+    max_position_bars = int(max_position_duration_hours * bars_per_hour) if enable_time_stop else None
+
+    # Determine position sizing mode
+    position_sizing_mode = getattr(cfg, "position_sizing_mode", "percentage")
+    position_size_pct = float(getattr(cfg, "position_size_pct", 1.0))  # Default 100% = full position
 
     cash = initial_capital
     position_units = 0.0
@@ -142,12 +158,60 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
     exec_price_list: list[float] = []
     position_entry_price = 0.0
 
+    # Stop-loss and take-profit tracking
+    stop_loss_price = None
+    take_profit_price = None
+    position_entry_bar = -1
+    stop_hit_count = 0
+    tp_hit_count = 0
+    time_stop_count = 0
+
     prev_equity = initial_capital
     eps = 1e-12
 
-    for price, target_signal in zip(close_arr, signal_arr):
+    for i, (price, target_signal) in enumerate(zip(close_arr, signal_arr)):
         price_f = float(price)
-        target_units = float(target_signal) * qty
+
+        # Check stop-loss, take-profit, and time-based exits BEFORE processing signal
+        forced_exit = False
+
+        if position_units != 0.0:
+            # 1. Check time-based stop
+            if max_position_bars is not None and position_entry_bar >= 0:
+                bars_in_position = i - position_entry_bar
+                if bars_in_position >= max_position_bars:
+                    forced_exit = True
+                    time_stop_count += 1
+
+            # 2. Check stop-loss (fixed percentage)
+            if not forced_exit and stop_loss_price is not None:
+                if (position_units > 0 and price_f <= stop_loss_price) or \
+                   (position_units < 0 and price_f >= stop_loss_price):
+                    forced_exit = True
+                    stop_hit_count += 1
+
+            # 3. Check take-profit (fixed percentage)
+            if not forced_exit and use_take_profit and take_profit_price is not None:
+                if (position_units > 0 and price_f >= take_profit_price) or \
+                   (position_units < 0 and price_f <= take_profit_price):
+                    forced_exit = True
+                    tp_hit_count += 1
+
+        # Override target if forced exit
+        if forced_exit:
+            target_units = 0.0
+        else:
+            # Calculate position size based on mode
+            if target_signal == 0:
+                target_units = 0.0
+            elif position_sizing_mode == "percentage":
+                # Full position mode: use percentage of equity
+                equity_now = cash + (position_units * price_f)
+                target_units = (np.sign(target_signal) * equity_now * position_size_pct) / price_f
+            else:
+                # Fixed size mode (legacy)
+                target_units = float(target_signal) * qty
+
         delta = target_units - position_units
         if abs(delta) <= eps:
             delta = 0.0
@@ -180,13 +244,27 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
             trade_pnl = realized_pnl - (fee + penalty_cost)
             if position_units == 0.0:
                 position_entry_price = 0.0
+                # Reset stop-loss and take-profit on position close
+                stop_loss_price = None
+                take_profit_price = None
             elif pos_before == 0.0 or np.sign(position_units) != np.sign(pos_before):
+                # Opening new position or reversing
                 position_entry_price = exec_price
+                position_entry_bar = i
+
+                # Calculate stop-loss price (fixed percentage)
+                if position_units > 0:  # Long position
+                    stop_loss_price = exec_price * (1.0 - stop_loss_pct)
+                    take_profit_price = exec_price * (1.0 + take_profit_pct) if use_take_profit else None
+                else:  # Short position
+                    stop_loss_price = exec_price * (1.0 + stop_loss_pct)
+                    take_profit_price = exec_price * (1.0 - take_profit_pct) if use_take_profit else None
             elif abs(position_units) > abs(pos_before) + eps:
                 added_units = abs(position_units) - abs(pos_before)
                 position_entry_price = (
                     entry_price_before * abs(pos_before) + exec_price * added_units
                 ) / abs(position_units)
+                # Update stops for averaged position (optional: recalculate or keep original)
             else:
                 position_entry_price = entry_price_before
         else:
@@ -232,6 +310,9 @@ def _event_driven_backtest(close: np.ndarray, signal: np.ndarray, cfg: Config) -
         "trade_exec_price": np.asarray(exec_price_list, dtype=float),
         "trade_pnl": np.asarray(trade_pnl_list, dtype=float),
         "turns": turns,
+        "stop_loss_hits": stop_hit_count,
+        "take_profit_hits": tp_hit_count,
+        "time_stop_hits": time_stop_count,
     }
 
 
@@ -272,6 +353,12 @@ def _evaluate_event_metrics(state: dict[str, np.ndarray | float], cfg: Config) -
     sortino = Evaluator._sortino(ret, ann_factor=np.sqrt(ann_factor)) if ret.size > 0 else 0.0
     calmar = (cagr / (mdd + 1e-12)) if mdd > 0 else cagr
     turns = float(state.get("turns", 0.0) or 0.0)
+
+    # Add stop-loss and take-profit statistics
+    stop_loss_hits = int(state.get("stop_loss_hits", 0) or 0)
+    take_profit_hits = int(state.get("take_profit_hits", 0) or 0)
+    time_stop_hits = int(state.get("time_stop_hits", 0) or 0)
+
     return {
         "cagr": cagr,
         "sharpe": sharpe,
@@ -280,6 +367,9 @@ def _evaluate_event_metrics(state: dict[str, np.ndarray | float], cfg: Config) -
         "turns": turns,
         "sortino": sortino,
         "calmar": calmar,
+        "stop_loss_hits": stop_loss_hits,
+        "take_profit_hits": take_profit_hits,
+        "time_stop_hits": time_stop_hits,
     }
 
 

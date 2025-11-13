@@ -45,17 +45,34 @@ class SuperTrendStrategy(Strategy):
 
 
     def _risk_levels(self, last_close: float, st: dict, signal: int) -> float | None:
-        pct = max(0.0, float(self.cfg.stop_loss_pct))
+        """计算止损价格（考虑杠杆）"""
+        # 使用scalping配置参数（已考虑杠杆）
+        pct = max(0.0, float(getattr(self.cfg, "scalping_stop_loss_pct", self.cfg.stop_loss_pct)))
         if pct <= 0 or last_close <= 0:
             return None
         if self.cfg.mode == "long_short":
             if signal == 1:
-                return last_close * (1.0 - pct)
+                stop_price = last_close * (1.0 - pct / 100.0)
+                self.logger.info(
+                    "🛑 多头止损: 当前价=%.2f, 止损价=%.2f (%.3f%%)",
+                    last_close, stop_price, pct
+                )
+                return stop_price
             if signal == -1:
-                return last_close * (1.0 + pct)
+                stop_price = last_close * (1.0 + pct / 100.0)
+                self.logger.info(
+                    "🛑 空头止损: 当前价=%.2f, 止损价=%.2f (%.3f%%)",
+                    last_close, stop_price, pct
+                )
+                return stop_price
         else:
             if signal == 1:
-                return last_close * (1.0 - pct)
+                stop_price = last_close * (1.0 - pct / 100.0)
+                self.logger.info(
+                    "🛑 多头止损: 当前价=%.2f, 止损价=%.2f (%.3f%%)",
+                    last_close, stop_price, pct
+                )
+                return stop_price
         return None
 
     def _compute_position_size(
@@ -70,6 +87,17 @@ class SuperTrendStrategy(Strategy):
         if self.cfg.mode == "long_flat" and signal < 0:
             return 0.0
 
+        # 支持百分比仓位模式
+        if self.cfg.position_sizing_mode == "percentage":
+            position_value = equity * self.cfg.position_size_pct
+            contracts = position_value / last_close
+            self.logger.info(
+                "📊 仓位计算(百分比): 净值=%.2f USDC × %.1f%% = %.2f USDC → %.6f BTC",
+                equity, self.cfg.position_size_pct * 100, position_value, contracts
+            )
+            return contracts
+
+        # 固定仓位模式
         fixed_size = float(getattr(self.cfg, "fixed_order_size", 0.0))
         if fixed_size > 0.0:
             return fixed_size
@@ -144,6 +172,11 @@ class SuperTrendStrategy(Strategy):
             return
         current_signal = trade_signal
         last_close = float(df_atr["Close"].iloc[-1])
+        if hasattr(self.exec, "on_price_tick"):
+            try:
+                self.exec.on_price_tick(last_close)
+            except Exception as hook_exc:  # pragma: no cover - defensive logging
+                self.logger.warning("on_price_tick hook failed: %s", hook_exc)
 
         if self.cfg.use_macd_filter:
             macd_df = self.ind.compute_macd(df_atr)
@@ -481,58 +514,54 @@ class SuperTrendStrategy(Strategy):
         if current_short == 0:
             self._entry_price_short = None
 
+        # 取消所有现有的条件单
         self.exec.cancel_all_conditional()
-        market_info = self.exec.market_info()
-        contract_value = float(
-            market_info.get("contractSize") or market_info.get("ctVal") or 1.0
-        )
-        loss_amount_cfg = max(0.0, float(getattr(self.cfg, "cooldown_loss_amount", 0.0)))
-        pct_stop = max(0.0, float(getattr(self.cfg, "cooldown_loss_pct", 0.0)))
-        placed_stop = False
-        if loss_amount_cfg > 0 and contract_value > 0:
-            if current_long > 0 and self._entry_price_long:
-                denom = current_long * contract_value
-                if denom > 0:
-                    delta = loss_amount_cfg / denom
-                    stop_price = max(0.0, self._entry_price_long - delta)
-                    hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-                    # 下止损单（平多仓）
-                    self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
-                    self.logger.info("Placed LONG stop loss at %.4f", stop_price)
+        # 使用百分比止盈止损（考虑杠杆）
+        stop_loss_pct = self.cfg.scalping_stop_loss_pct  # 0.1% (已考虑杠杆)
+        take_profit_pct = self.cfg.scalping_take_profit_pct  # 0.2% (已考虑杠杆)
 
-                    # 下反向开仓条件单（开空仓）
-                    reverse_hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-                    self.exec.place_stop("sell", current_long, stop_price, reverse_hedge_ps, reduce_only=False)
-                    self.logger.info("Placed reverse SHORT open at %.4f", stop_price)
+        if current_long > 0 and self._entry_price_long:
+            # 多头仓位的止损和止盈
+            stop_price = self._entry_price_long * (1.0 - stop_loss_pct / 100.0)
+            tp_price = self._entry_price_long * (1.0 + take_profit_pct / 100.0)
+            hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-                    placed_stop = True
-            elif current_short > 0 and self._entry_price_short:
-                denom = current_short * contract_value
-                if denom > 0:
-                    delta = loss_amount_cfg / denom
-                    stop_price = max(0.0, self._entry_price_short + delta)
-                    hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
+            # 下止损单（平多仓）
+            self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
+            self.logger.info(
+                "🛑 多头止损单: 入场价=%.2f, 止损价=%.2f (%.3f%%)",
+                self._entry_price_long, stop_price, stop_loss_pct
+            )
 
-                    # 下止损单（平空仓）
-                    self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
-                    self.logger.info("Placed SHORT stop loss at %.4f", stop_price)
+            # 下止盈单（平多仓）
+            if self.cfg.use_take_profit:
+                self.exec.place_take_profit("sell", current_long, tp_price, hedge_ps, reduce_only=True)
+                self.logger.info(
+                    "🎯 多头止盈单: 入场价=%.2f, 止盈价=%.2f (%.3f%%)",
+                    self._entry_price_long, tp_price, take_profit_pct
+                )
 
-                    # 下反向开仓条件单（开多仓）
-                    reverse_hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-                    self.exec.place_stop("buy", current_short, stop_price, reverse_hedge_ps, reduce_only=False)
-                    self.logger.info("Placed reverse LONG open at %.4f", stop_price)
+        elif current_short > 0 and self._entry_price_short:
+            # 空头仓位的止损和止盈
+            stop_price = self._entry_price_short * (1.0 + stop_loss_pct / 100.0)
+            tp_price = self._entry_price_short * (1.0 - take_profit_pct / 100.0)
+            hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
 
-                    placed_stop = True
-        if not placed_stop and pct_stop > 0:
-            if current_long > 0 and self._entry_price_long:
-                stop_price = max(0.0, self._entry_price_long * (1.0 - pct_stop))
-                hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
-                self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
-            elif current_short > 0 and self._entry_price_short:
-                stop_price = max(0.0, self._entry_price_short * (1.0 + pct_stop))
-                hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
-                self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
+            # 下止损单（平空仓）
+            self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
+            self.logger.info(
+                "🛑 空头止损单: 入场价=%.2f, 止损价=%.2f (%.3f%%)",
+                self._entry_price_short, stop_price, stop_loss_pct
+            )
+
+            # 下止盈单（平空仓）
+            if self.cfg.use_take_profit:
+                self.exec.place_take_profit("buy", current_short, tp_price, hedge_ps, reduce_only=True)
+                self.logger.info(
+                    "🎯 空头止盈单: 入场价=%.2f, 止盈价=%.2f (%.3f%%)",
+                    self._entry_price_short, tp_price, take_profit_pct
+                )
 
         action_str = "|".join(actions) if actions else None
         exec_price = prices[-1] if prices else None
