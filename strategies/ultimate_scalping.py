@@ -90,15 +90,56 @@ class UltimateScalpingStrategy(Strategy):
         prev_close = float(df_atr['Close'].iloc[-2])
         prev_ema_fast = float(ema_fast.iloc[-2])
 
+        # ================== 市场环境过滤器 ==================
+
+        # 1. ATR波动率过滤：避免在低波动时交易
+        last_atr = float(df_atr['ATR'].iloc[-1])
+        atr_pct = last_atr / last_close
+        min_atr_pct = 0.003  # 最小0.3%波动率（可通过环境变量配置）
+
+        if atr_pct < min_atr_pct:
+            self.logger.info(
+                "⚠ 波动率过低: ATR=%.2f (%.3f%%) < 最小要求%.3f%%, 跳过交易",
+                last_atr, atr_pct * 100, min_atr_pct * 100
+            )
+            return
+
+        # 2. 时间过滤：避开低流动性时段
+        now_utc = datetime.utcnow()
+        hour_utc = now_utc.hour
+        weekday = now_utc.weekday()  # 0=周一, 6=周日
+
+        # 亚洲早盘低流动性时段 (UTC 0:00-6:00 = 北京时间 8:00-14:00)
+        if 0 <= hour_utc < 6:
+            self.logger.info(
+                "⚠ 亚洲早盘低流动性时段 (UTC %02d:00), 跳过交易",
+                hour_utc
+            )
+            return
+
+        # 周末（周六凌晨-周一凌晨）
+        # 加密货币市场7x24交易，但周末流动性降低
+        if weekday == 5 or weekday == 6:  # 周六或周日
+            self.logger.info(
+                "⚠ 周末低流动性时段 (周%s), 跳过交易",
+                "六" if weekday == 5 else "日"
+            )
+            return
+
+        self.logger.info(
+            "✓ 市场环境检查通过: ATR=%.3f%%, 时间=UTC %02d:00 (周%d)",
+            atr_pct * 100, hour_utc, weekday + 1
+        )
+
         # ================== 交易信号逻辑 ==================
 
         # 趋势识别
         trend_up = last_ema_fast > last_ema_slow and last_st_direction == 1
         trend_down = last_ema_fast < last_ema_slow and last_st_direction == 0
 
-        # 动量判断
-        rsi_bull = last_rsi > 55
-        rsi_bear = last_rsi < 45
+        # 动量判断（提高阈值以减少假信号）
+        rsi_bull = last_rsi > 60  # 从55提高到60
+        rsi_bear = last_rsi < 40  # 从45降低到40
 
         # 主信号: 价格穿越快速EMA
         crossover_up = prev_close <= prev_ema_fast and last_close > last_ema_fast
@@ -107,16 +148,18 @@ class UltimateScalpingStrategy(Strategy):
         long_condition = trend_up and rsi_bull and crossover_up
         short_condition = trend_down and rsi_bear and crossunder_down
 
-        # 辅助信号: 回调重入
+        # 辅助信号: 回调重入（收紧条件以提高质量）
         long_reentry = (
             trend_up
             and last_close > last_ema_fast
-            and 50 < last_rsi < 70
+            and 55 < last_rsi < 65  # 从50-70缩窄至55-65
+            and last_close > prev_close  # 增加：当前K线上涨
         )
         short_reentry = (
             trend_down
             and last_close < last_ema_fast
-            and 30 < last_rsi < 50
+            and 35 < last_rsi < 45  # 从30-50缩窄至35-45
+            and last_close < prev_close  # 增加：当前K线下跌
         )
 
         # 最终信号合并

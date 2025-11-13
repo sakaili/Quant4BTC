@@ -5,7 +5,8 @@
       "Bash(cat:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(powershell -Command \"$env:STRATEGY_NAME=''''; $env:SCALPING_STOP_LOSS_PCT=''''; $env:SCALPING_TAKE_PROFIT_PCT=''''; python -c ''from config import Config; c = Config(); print(f\"\"strategy_name: {c.strategy_name}\"\"); print(f\"\"scalping_stop_loss_pct: {c.scalping_stop_loss_pct}\"\"); print(f\"\"scalping_take_profit_pct: {c.scalping_take_profit_pct}\"\")''\")"
     ],
     "deny": [],
     "ask": []
