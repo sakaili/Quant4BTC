@@ -883,44 +883,14 @@ class SuperTrendStrategy(Strategy):
             tp_price = self._entry_price_long * (1.0 + take_profit_pct / 100.0)
             hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-            self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
-            self.logger.info(
-                "?? ????????=%.2f, ???=%.2f (%.3f%%)",
-                self._entry_price_long,
-                stop_price,
-                stop_loss_pct,
-            )
-
-            if self.cfg.use_take_profit:
-                self.exec.place_take_profit("sell", current_long, tp_price, hedge_ps, reduce_only=True)
-                self.logger.info(
-                    "?? ????????=%.2f, ???=%.2f (%.3f%%)",
-                    self._entry_price_long,
-                    tp_price,
-                    take_profit_pct,
-                )
+            self.logger.info("⚠️ 多头静态止盈止损已暂停: 入场价=%.2f", self._entry_price_long)
 
         elif current_short > 0 and self._entry_price_short:
             stop_price = self._entry_price_short * (1.0 + stop_loss_pct / 100.0)
             tp_price = self._entry_price_short * (1.0 - take_profit_pct / 100.0)
             hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
 
-            self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
-            self.logger.info(
-                "?? ????????=%.2f, ???=%.2f (%.3f%%)",
-                self._entry_price_short,
-                stop_price,
-                stop_loss_pct,
-            )
-
-            if self.cfg.use_take_profit:
-                self.exec.place_take_profit("buy", current_short, tp_price, hedge_ps, reduce_only=True)
-                self.logger.info(
-                    "?? ????????=%.2f, ???=%.2f (%.3f%%)",
-                    self._entry_price_short,
-                    tp_price,
-                    take_profit_pct,
-                )
+            self.logger.info("⚠️ 空头静态止盈止损已暂停: 入场价=%.2f", self._entry_price_short)
 
         action_str = "|".join(actions) if actions else None
         exec_price = prices[-1] if prices else None
