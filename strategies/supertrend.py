@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -97,8 +98,19 @@ class SuperTrendStrategy(Strategy):
             )
             return contracts
 
-        # 固定仓位模式
-        fixed_size = float(getattr(self.cfg, "fixed_order_size", 0.0))
+        # 固定仓位模式 - 根据品种设置不同数量
+        symbol = self.cfg.symbol
+        if "BTC" in symbol.upper():
+            fixed_size = 0.005  # BTC 固定 0.005
+            self.logger.info("📊 仓位计算(固定): BTC 固定数量 = %.6f BTC", fixed_size)
+        elif "ETH" in symbol.upper():
+            fixed_size = 0.15  # ETH 固定 0.15
+            self.logger.info("📊 仓位计算(固定): ETH 固定数量 = %.6f ETH", fixed_size)
+        else:
+            # 其他品种使用配置中的默认值
+            fixed_size = float(getattr(self.cfg, "fixed_order_size", 0.01))
+            self.logger.info("📊 仓位计算(固定): %s 使用默认数量 = %.6f", symbol, fixed_size)
+
         if fixed_size > 0.0:
             return fixed_size
 
@@ -136,6 +148,296 @@ class SuperTrendStrategy(Strategy):
                 return min_contracts
             return 0.0
         return contracts
+
+    def _open_with_maker(
+        self,
+        side: str,
+        amount: float,
+        current_signal: int,
+        df_atr,
+        st: dict,
+    ) -> dict | None:
+        """使用 Maker 订单开仓，带智能改单逻辑.
+
+        Args:
+            side: "long" or "short"
+            amount: 开仓数量
+            current_signal: 当前信号 (1=long, -1=short)
+            df_atr: 包含ATR的数据DataFrame
+            st: SuperTrend计算结果
+
+        Returns:
+            dict: 成交结果 {"status": "ok", "price": float, "amount": float} 或 None
+        """
+        if amount <= 0:
+            return None
+
+        max_retries = self.cfg.maker_max_retries
+        retry_interval = self.cfg.maker_retry_interval
+        max_deviation = self.cfg.maker_max_price_deviation
+        price_offset_pct = self.cfg.maker_price_offset_pct / 100.0  # 转换为小数（0.1% -> 0.001）
+
+        position_side = None
+        if self.cfg.position_mode.lower() == "hedge":
+            position_side = "long" if side == "long" else "short"
+
+        # 智能改单逻辑：记录上次BBO价格和当前订单ID
+        last_bbo_price = None
+        current_order_id = None
+
+        for retry in range(max_retries):
+            try:
+                # 获取BBO价格
+                bbo = self.exec.get_bbo()
+                current_bbo = bbo["bid"] if side == "long" else bbo["ask"]
+
+                # 判断是否需要改单
+                should_amend = True
+
+                if retry > 0 and last_bbo_price is not None and current_order_id:
+                    # 判断价格变动方向
+                    if side == "long":
+                        # 做多：BID下降 = 有利（更容易成交），不改单
+                        price_favorable = current_bbo < last_bbo_price
+                    else:
+                        # 做空：ASK上涨 = 有利（更容易成交），不改单
+                        price_favorable = current_bbo > last_bbo_price
+
+                    if price_favorable:
+                        # 价格朝有利方向变动，保持原订单
+                        should_amend = False
+                        self.logger.info(
+                            f"✅ 价格朝有利方向变动 ({last_bbo_price:.2f} → {current_bbo:.2f})，"
+                            f"保持原订单 ID={current_order_id}"
+                        )
+                    else:
+                        # 价格朝不利方向变动，需要改单
+                        self.logger.info(
+                            f"⚠️ 价格朝不利方向变动 ({last_bbo_price:.2f} → {current_bbo:.2f})，"
+                            f"取消并改单"
+                        )
+
+                # 如果不需要改单，直接等待并检查订单状态
+                if not should_amend:
+                    time.sleep(retry_interval)
+
+                    # 检查订单状态
+                    status_resp = self.exec.check_order_status(current_order_id)
+                    if status_resp.get("status") == "error":
+                        self.logger.error(f"查询订单状态失败: {status_resp.get('reason')}")
+                        continue
+
+                    order_status = status_resp.get("status", "").lower()
+
+                    if order_status in ["closed", "filled"]:
+                        # 订单已成交
+                        filled_price = status_resp.get("price", 0.0)
+                        filled_amount = status_resp.get("filled", amount)
+
+                        # 获取当前市场价格，检查偏离度
+                        current_bbo_check = self.exec.get_bbo()
+                        current_market_price = (current_bbo_check["bid"] + current_bbo_check["ask"]) / 2.0
+
+                        deviation = abs(filled_price - current_market_price) / current_market_price
+
+                        if deviation > max_deviation:
+                            self.logger.error(
+                                f"⚠️ 成交价偏离过大! 成交价={filled_price:.2f}, 市价={current_market_price:.2f}, "
+                                f"偏离={deviation*100:.2f}% (限制={max_deviation*100:.2f}%)"
+                            )
+                            # 立即平仓
+                            self._emergency_flatten(side, filled_amount, current_market_price)
+                            return None
+
+                        self.logger.info(
+                            f"✅ Maker订单成交! 价格={filled_price:.2f}, 数量={filled_amount:.6f}"
+                        )
+                        return {
+                            "status": "ok",
+                            "price": filled_price,
+                            "amount": filled_amount,
+                            "order_id": current_order_id,
+                        }
+
+                    elif order_status in ["open", "active"]:
+                        # 订单未成交，检查信号是否仍然有效
+                        self.logger.info(f"订单未成交，检查信号有效性...")
+
+                        # 重新计算信号
+                        best_factor = self.selector.maybe_select(df_atr)
+                        st_new = self.ind.compute_supertrend(df_atr, best_factor)
+                        sig_arr = self.sbuilder.build(df_atr, st_new)
+                        new_signal = int(sig_arr[-1])
+                        trade_signal = new_signal if not self._invert_signal else -new_signal
+
+                        if trade_signal != current_signal:
+                            self.logger.warning(
+                                f"⚠️ 信号已改变 ({current_signal} -> {trade_signal})，取消订单"
+                            )
+                            self.exec.cancel_order(current_order_id)
+                            return None
+
+                        # 信号仍有效，但价格有利，继续等待（不改单）
+                        self.logger.info(f"信号仍有效，继续等待原订单成交...")
+                        continue
+
+                    else:
+                        # 订单已取消或其他状态
+                        self.logger.warning(f"订单状态异常: {order_status}")
+                        current_order_id = None
+                        continue
+
+                # 需要改单：取消旧订单并下新单
+                if current_order_id:
+                    self.exec.cancel_order(current_order_id)
+                    current_order_id = None
+
+                # 🔑 关键改进：向更优方向偏移，确保成为Maker
+                if side == "long":
+                    # 做多：使用买一价(bid)再便宜price_offset_pct，确保排队等待成交
+                    base_price = current_bbo
+                    order_price = base_price * (1.0 - price_offset_pct)
+                    self.logger.info(
+                        f"🔄 Maker开仓尝试 {retry + 1}/{max_retries}: LONG {amount:.6f} @ {order_price:.2f} "
+                        f"(BID={base_price:.2f} -{self.cfg.maker_price_offset_pct}%)"
+                    )
+                else:
+                    # 做空：使用卖一价(ask)再贵price_offset_pct，确保排队等待成交
+                    base_price = current_bbo
+                    order_price = base_price * (1.0 + price_offset_pct)
+                    self.logger.info(
+                        f"🔄 Maker开仓尝试 {retry + 1}/{max_retries}: SHORT {amount:.6f} @ {order_price:.2f} "
+                        f"(ASK={base_price:.2f} +{self.cfg.maker_price_offset_pct}%)"
+                    )
+
+                # 下Limit订单
+                order_side = "buy" if side == "long" else "sell"
+                resp = self.exec.place_limit_order(
+                    side=order_side,
+                    amount=amount,
+                    price=order_price,
+                    reduce_only=False,
+                    pos_side=position_side,
+                )
+
+                if resp.get("status") != "ok":
+                    self.logger.error(f"Limit订单下单失败: {resp.get('reason')}")
+                    continue
+
+                current_order_id = resp.get("order_id")
+                self.logger.info(f"✅ Limit订单已下: ID={current_order_id}")
+
+                # 更新状态
+                last_bbo_price = current_bbo
+
+                # 等待成交
+                time.sleep(retry_interval)
+
+                # 检查订单状态
+                status_resp = self.exec.check_order_status(current_order_id)
+                if status_resp.get("status") == "error":
+                    self.logger.error(f"查询订单状态失败: {status_resp.get('reason')}")
+                    continue
+
+                order_status = status_resp.get("status", "").lower()
+
+                if order_status in ["closed", "filled"]:
+                    # 订单已成交
+                    filled_price = status_resp.get("price", 0.0)
+                    filled_amount = status_resp.get("filled", amount)
+
+                    # 获取当前市场价格，检查偏离度
+                    current_bbo_check2 = self.exec.get_bbo()
+                    current_market_price = (current_bbo_check2["bid"] + current_bbo_check2["ask"]) / 2.0
+
+                    deviation = abs(filled_price - current_market_price) / current_market_price
+
+                    if deviation > max_deviation:
+                        self.logger.error(
+                            f"⚠️ 成交价偏离过大! 成交价={filled_price:.2f}, 市价={current_market_price:.2f}, "
+                            f"偏离={deviation*100:.2f}% (限制={max_deviation*100:.2f}%)"
+                        )
+                        # 立即平仓
+                        self._emergency_flatten(side, filled_amount, current_market_price)
+                        return None
+
+                    self.logger.info(
+                        f"✅ Maker订单成交! 价格={filled_price:.2f}, 数量={filled_amount:.6f}"
+                    )
+                    return {
+                        "status": "ok",
+                        "price": filled_price,
+                        "amount": filled_amount,
+                        "order_id": current_order_id,
+                    }
+
+                elif order_status in ["open", "active"]:
+                    # 订单未成交，检查信号是否仍然有效
+                    self.logger.info(f"订单未成交，检查信号有效性...")
+
+                    # 重新计算信号
+                    best_factor = self.selector.maybe_select(df_atr)
+                    st_new = self.ind.compute_supertrend(df_atr, best_factor)
+                    sig_arr = self.sbuilder.build(df_atr, st_new)
+                    new_signal = int(sig_arr[-1])
+                    trade_signal = new_signal if not self._invert_signal else -new_signal
+
+                    if trade_signal != current_signal:
+                        self.logger.warning(
+                            f"⚠️ 信号已改变 ({current_signal} -> {trade_signal})，取消订单"
+                        )
+                        self.exec.cancel_order(current_order_id)
+                        return None
+
+                    # 信号仍有效，取消订单准备改单
+                    self.logger.info(f"信号仍有效，取消订单准备改单...")
+                    self.exec.cancel_order(current_order_id)
+                    current_order_id = None
+
+                else:
+                    # 订单已取消或其他状态
+                    self.logger.warning(f"订单状态异常: {order_status}")
+                    current_order_id = None
+                    continue
+
+            except Exception as exc:
+                self.logger.error(f"Maker开仓第 {retry + 1} 次尝试失败: {exc}")
+                if current_order_id:
+                    try:
+                        self.exec.cancel_order(current_order_id)
+                    except:
+                        pass
+                    current_order_id = None
+                continue
+
+        # 达到最大重试次数，改用市价单
+        self.logger.warning(f"⚠️ Maker订单 {max_retries} 次未成交，改用市价单")
+        return self._open_with_market(side, amount)
+
+    def _open_with_market(self, side: str, amount: float) -> dict | None:
+        """使用市价单开仓（Maker失败后的备选方案）"""
+        last_close = self.exec.exch.fetch_ticker_last()
+
+        if side == "long":
+            resp = self.exec.open_long(amount, last_close)
+        else:
+            resp = self.exec.open_short(amount, last_close)
+
+        if resp and resp.get("status") == "ok":
+            self.logger.info(
+                f"✅ 市价单成交: {side.upper()} {amount:.6f} @ {resp.get('price', last_close):.2f}"
+            )
+            return resp
+        return None
+
+    def _emergency_flatten(self, side: str, amount: float, last_price: float):
+        """紧急平仓（成交价偏离过大时）"""
+        self.logger.error(f"🚨 紧急平仓: {side.upper()} {amount:.6f}")
+
+        if side == "long":
+            self.exec.close_long(amount, last_price)
+        else:
+            self.exec.close_short(amount, last_price)
 
     def run_once(self, equity: float | None = None) -> None:
         df = self.fetcher.fetch_ohlcv_df()
@@ -482,7 +784,12 @@ class SuperTrendStrategy(Strategy):
         add_long = max(0, desired_long - current_long)
         long_avg_base = current_long
         if add_long > 0:
-            resp = self.exec.open_long(add_long, last_close)
+            # 使用 Maker 订单开仓（如果启用）
+            if self.cfg.maker_order_enabled:
+                resp = self._open_with_maker("long", add_long, current_signal, df_atr, st)
+            else:
+                resp = self.exec.open_long(add_long, last_close)
+
             record(resp, f"open_long_{add_long}")
             if resp and resp.get("status") == "ok":
                 fill_price = float(resp.get("price") or last_close)
@@ -499,7 +806,12 @@ class SuperTrendStrategy(Strategy):
 
         add_short = max(0, desired_short - current_short)
         if add_short > 0:
-            resp = self.exec.open_short(add_short, last_close)
+            # 使用 Maker 订单开仓（如果启用）
+            if self.cfg.maker_order_enabled:
+                resp = self._open_with_maker("short", add_short, current_signal, df_atr, st)
+            else:
+                resp = self.exec.open_short(add_short, last_close)
+
             record(resp, f"open_short_{add_short}")
             if resp and resp.get("status") == "ok":
                 fill_price = float(resp.get("price") or last_close)

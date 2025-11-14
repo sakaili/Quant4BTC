@@ -174,3 +174,129 @@ class OrderExecutor:
         if short_amount <= 0:
             return None
         return self.close_short(short_amount, last_price)
+
+    def get_bbo(self) -> dict:
+        """Get Best Bid and Best Offer (BBO) prices from order book.
+
+        Returns:
+            dict: {
+                "bid": float,  # Best bid price
+                "ask": float,  # Best ask price
+                "bid_size": float,  # Best bid quantity
+                "ask_size": float,  # Best ask quantity
+            }
+        """
+        try:
+            orderbook = self.exch.fetch_order_book(limit=5)
+            if not orderbook or "bids" not in orderbook or "asks" not in orderbook:
+                raise ValueError("Invalid order book response")
+
+            if not orderbook["bids"] or not orderbook["asks"]:
+                raise ValueError("Empty order book")
+
+            best_bid = orderbook["bids"][0]
+            best_ask = orderbook["asks"][0]
+
+            return {
+                "bid": float(best_bid[0]),
+                "ask": float(best_ask[0]),
+                "bid_size": float(best_bid[1]),
+                "ask_size": float(best_ask[1]),
+            }
+        except Exception as exc:
+            self.logger.error(f"Failed to fetch BBO: {exc}")
+            raise
+
+    def place_limit_order(
+        self,
+        side: str,
+        amount: float,
+        price: float,
+        reduce_only: bool,
+        pos_side: str | None,
+    ) -> dict:
+        """Place a limit order (Maker order).
+
+        Args:
+            side: "buy" or "sell"
+            amount: Order quantity in contracts
+            price: Limit price
+            reduce_only: True for closing positions only
+            pos_side: "long" or "short" for hedge mode, None for net mode
+
+        Returns:
+            dict: {
+                "status": "ok" or "error",
+                "order_id": str,
+                "reason": str (only if error),
+            }
+        """
+        qty = self._normalise_amount(amount)
+        position_side = pos_side.lower().strip() if pos_side else None
+
+        try:
+            order = self.exch.create_limit_order(
+                side=side.lower().strip(),
+                amount=qty,
+                price=price,
+                reduce_only=reduce_only,
+                pos_side=position_side,
+            )
+            order_id = order.get("id", "")
+            self.logger.info(
+                f"[Binance] limit order id={order_id} side={side} qty={qty:.6f} price={price:.6f}"
+            )
+            return {"status": "ok", "order_id": order_id}
+        except Exception as exc:
+            self.logger.error(f"Limit order failed: {exc}")
+            return {"status": "error", "reason": str(exc)}
+
+    def check_order_status(self, order_id: str) -> dict:
+        """Check the status of an order.
+
+        Args:
+            order_id: Order ID to check
+
+        Returns:
+            dict: {
+                "status": "open" | "closed" | "canceled" | "error",
+                "filled": float,  # Filled quantity
+                "remaining": float,  # Remaining quantity
+                "price": float,  # Average fill price (if filled)
+                "reason": str,  # Error reason if status is "error"
+            }
+        """
+        try:
+            order = self.exch.fetch_order(order_id)
+
+            status = order.get("status", "").lower()
+            filled = float(order.get("filled", 0.0))
+            remaining = float(order.get("remaining", 0.0))
+            avg_price = float(order.get("average", 0.0) or 0.0)
+
+            return {
+                "status": status,
+                "filled": filled,
+                "remaining": remaining,
+                "price": avg_price,
+            }
+        except Exception as exc:
+            self.logger.error(f"Failed to check order status: {exc}")
+            return {"status": "error", "reason": str(exc)}
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order.
+
+        Args:
+            order_id: Order ID to cancel
+
+        Returns:
+            bool: True if successfully canceled, False otherwise
+        """
+        try:
+            self.exch.cancel_order(order_id)
+            self.logger.info(f"[Binance] Canceled order id={order_id}")
+            return True
+        except Exception as exc:
+            self.logger.error(f"Failed to cancel order {order_id}: {exc}")
+            return False

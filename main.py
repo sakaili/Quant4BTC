@@ -1,6 +1,7 @@
 ﻿# main.py
 import signal
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime
 
@@ -41,7 +42,15 @@ def main():
         raise ValueError(f"未知策略 '{base_cfg.strategy_name}'，请检查 STRATEGY_NAME 环境变量")
 
     symbols = base_cfg.symbol_list
-    base_logger.info(f"初始化多品种交易: {symbols}")
+    if not symbols:
+        raise ValueError("No tradable symbols defined via CONTRACT_SYMBOLS or CONTRACT_SYMBOL")
+    base_logger.info(f"Enabled symbols: {symbols}")
+
+    # Dedicated account-level client for balance snapshots to avoid per-strategy coupling
+    account_cfg = replace(base_cfg, symbol=symbols[0])
+    account_logger = base_logger.getChild("account")
+    account_exch = ExchangeClient(account_cfg, account_logger)
+    account_executor = OrderExecutor(account_cfg, account_exch, account_logger)
 
     # 为每个品种创建独立的策略实例
     strategies = []
@@ -81,38 +90,46 @@ def main():
     base_logger.info(f"等待 {sleep_secs:.2f}s 对齐下一根 {base_cfg.timeframe} K 线")
     time.sleep(sleep_secs)
 
-    # 主循环: 顺序执行各品种
-    base_logger.info("开始多品种循环交易...")
-    while True:
-        cycle_start = time.time()
+    # Main loop: run all symbols in parallel to avoid maker blocking delays
+    base_logger.info("Starting multi-symbol loop...")
+    workers = ThreadPoolExecutor(max_workers=len(strategies))
+    try:
+        while True:
+            cycle_start = time.time()
 
-        # 在周期开始时读取一次净值，所有品种共享此快照
-        try:
-            # 使用第一个策略的executor读取净值（所有品种共享同一个账户）
-            total_equity = strategies[0][1].exec.account_equity()
-            num_symbols = len(strategies)
-            # 每个品种分配总净值的平均份额
-            equity_per_symbol = total_equity / num_symbols
-            base_logger.info(
-                f"📊 周期净值快照: {total_equity:.2f} USDC → 每品种分配: {equity_per_symbol:.2f} USDC ({num_symbols}个品种)"
-            )
-        except Exception as e:
-            base_logger.error(f"读取账户净值失败: {e}", exc_info=True)
-            equity_per_symbol = None  # 失败时传递None，策略会自行读取
-
-        for symbol, strategy in strategies:
+            # Snapshot account equity once per cycle for all strategies
             try:
-                base_logger.info(f"========== 执行 {symbol} ==========")
-                strategy.run_once(equity=equity_per_symbol)
+                total_equity = account_executor.account_equity()
+                num_symbols = len(strategies)
+                equity_per_symbol = total_equity / num_symbols
+                base_logger.info(
+                    f"Equity snapshot: {total_equity:.2f} USDC -> per-symbol: {equity_per_symbol:.2f} USDC ({num_symbols} symbols)"
+                )
             except Exception as e:
-                base_logger.error(f"[{symbol}] 执行失败: {e}", exc_info=True)
+                base_logger.error(f"Failed to read account equity: {e}", exc_info=True)
+                equity_per_symbol = None  # Fallback to strategy-specific handling
 
-        # 等待下一个周期
-        elapsed = time.time() - cycle_start
-        wait_time = max(0, tf_sec - elapsed)
-        if wait_time > 0:
-            base_logger.info(f"本周期耗时 {elapsed:.2f}s, 等待 {wait_time:.2f}s 进入下一周期")
-            time.sleep(wait_time)
+            futures = {}
+            for symbol, strategy in strategies:
+                base_logger.info(f"========== Running {symbol} =========")
+                fut = workers.submit(strategy.run_once, equity_per_symbol)
+                futures[fut] = symbol
+
+            for fut in as_completed(futures):
+                symbol = futures[fut]
+                try:
+                    fut.result()
+                except Exception as e:
+                    base_logger.error(f"[{symbol}] run_once failed: {e}", exc_info=True)
+
+            # Wait for the next cycle alignment
+            elapsed = time.time() - cycle_start
+            wait_time = max(0, tf_sec - elapsed)
+            if wait_time > 0:
+                base_logger.info(f"Cycle elapsed {elapsed:.2f}s, sleeping {wait_time:.2f}s before next cycle")
+                time.sleep(wait_time)
+    finally:
+        workers.shutdown(wait=True)
 
 
 if __name__ == "__main__":

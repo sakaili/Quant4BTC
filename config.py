@@ -76,8 +76,8 @@ class Config:
     ema_slow_length: int = int(os.getenv("EMA_SLOW_LENGTH", "50"))
     rsi_length: int = int(os.getenv("RSI_LENGTH", "14"))
     supertrend_mult: float = float(os.getenv("SUPERTREND_MULT", "3.0"))
-    scalping_take_profit_pct: float = 0.2  # Hardcoded: 0.2% price TP = 2% account profit (10x leverage)
-    scalping_stop_loss_pct: float = 0.1  # Hardcoded: 0.1% price SL = 1% account loss (10x leverage)
+    scalping_take_profit_pct: float = float(os.getenv("SCALPING_TAKE_PROFIT_PCT", "0.2"))  # Price TP% (considering leverage)
+    scalping_stop_loss_pct: float = float(os.getenv("SCALPING_STOP_LOSS_PCT", "0.1"))  # Price SL% (considering leverage)
     scalping_reversal_exit: bool = os.getenv("SCALPING_REVERSAL_EXIT", "true").lower() in TRUE_SET
 
     # Risk mode
@@ -118,6 +118,13 @@ class Config:
     cooldown_loss_pct: float = float(os.getenv("COOLDOWN_LOSS_PCT", "0.0"))
     cooldown_loss_amount: float = float(os.getenv("COOLDOWN_LOSS_AMOUNT", "3.0"))
     cooldown_duration_minutes: int = int(os.getenv("COOLDOWN_DURATION_MINUTES", "0"))
+
+    # Maker order configuration
+    maker_order_enabled: bool = os.getenv("MAKER_ORDER_ENABLED", "true").lower() in TRUE_SET
+    maker_max_retries: int = int(os.getenv("MAKER_MAX_RETRIES", "5"))
+    maker_retry_interval: int = int(os.getenv("MAKER_RETRY_INTERVAL", "30"))
+    maker_max_price_deviation: float = float(os.getenv("MAKER_MAX_PRICE_DEVIATION", "0.005"))
+    maker_price_offset_pct: float = float(os.getenv("MAKER_PRICE_OFFSET_PCT", "0.1"))  # 0.1% offset to ensure maker order
 
     # Normalisation
     zscore_window: int = int(os.getenv("ZSCORE_WINDOW", "12"))

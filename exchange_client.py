@@ -197,3 +197,42 @@ class ExchangeClient:
         except Exception as exc:
             self.logger.error(f"Failed to cancel stop orders: {exc}")
             return {"status": "error", "reason": str(exc)}
+
+    def create_limit_order(
+        self,
+        side: str,
+        amount: float,
+        price: float,
+        reduce_only: bool,
+        pos_side: str | None,
+    ):
+        """Create a limit order (Maker order)."""
+        params: Dict[str, Any] = {}
+        hedge_params = self._hedge_side_param(pos_side)
+        params.update(hedge_params)
+        if reduce_only and not hedge_params:
+            params["reduceOnly"] = True
+
+        # Ensure price is within precision
+        precise_price = self.price_to_precision(price)
+
+        return self.exchange.create_order(
+            symbol=self.cfg.symbol,
+            type="limit",
+            side=side,
+            amount=amount,
+            price=precise_price,
+            params=params,
+        )
+
+    def fetch_order_book(self, limit: int = 5):
+        """Fetch order book with best bids and asks."""
+        return self.exchange.fetch_order_book(self.cfg.symbol, limit=limit)
+
+    def fetch_order(self, order_id: str):
+        """Fetch order details by order ID."""
+        return self.exchange.fetch_order(order_id, self.cfg.symbol)
+
+    def cancel_order(self, order_id: str):
+        """Cancel an order by order ID."""
+        return self.exchange.cancel_order(order_id, self.cfg.symbol)

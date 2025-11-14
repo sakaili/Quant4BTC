@@ -53,30 +53,7 @@ class Strategy(ABC):
                 time.sleep(5)
 
     def _assess_drawdown(self, equity: float) -> Optional[str]:
-        if equity <= 0:
-            return None
-
-        now = datetime.utcnow()
-        if self._daily_anchor_date != now.date():
-            self._daily_anchor_date = now.date()
-            self._daily_anchor_equity = equity
-            self._daily_suspend_until = None
-        else:
-            self._daily_anchor_equity = max(self._daily_anchor_equity or equity, equity)
-
-        overall_floor = self.cfg.initial_capital * (1.0 - self.cfg.overall_drawdown_limit)
-        if equity <= overall_floor:
-            self._global_kill = False
-            return "overall"
-
-        if self._daily_suspend_until and now < self._daily_suspend_until:
-            return "daily_active"
-
-        anchor = self._daily_anchor_equity or equity
-        daily_floor = anchor * (1.0 - self.cfg.daily_drawdown_limit)
-        if equity <= daily_floor:
-            self._daily_suspend_until = now + timedelta(hours=24)
-            return "daily_trigger"
+        """Drawdown protection disabled - always returns None to allow trading."""
         return None
 
     def _flatten_positions(self, long_amt: int, short_amt: int, last_price: float) -> None:

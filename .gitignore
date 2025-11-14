@@ -14,7 +14,6 @@ venv/
 env/
 
 # Environment variables / secrets
-.env
 
 # Logs and datasets
 logs/
