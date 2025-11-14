@@ -71,6 +71,14 @@ class Config:
     macd_atr_max: float = float(os.getenv("MACD_ATR_MAX", "0.02"))
     macd_atr_stop_multiple: float = float(os.getenv("MACD_ATR_STOP_MULTIPLE", "2.0"))
 
+    # KDJ filter parameters
+    enable_kdj_filter: bool = os.getenv("ENABLE_KDJ_FILTER", "true").lower() in TRUE_SET
+    kdj_period: int = int(os.getenv("KDJ_PERIOD", "9"))
+    kdj_k_smoothing: int = int(os.getenv("KDJ_K_SMOOTHING", "3"))
+    kdj_d_smoothing: int = int(os.getenv("KDJ_D_SMOOTHING", "3"))
+    kdj_buy_j_threshold: float = float(os.getenv("KDJ_BUY_J_THRESHOLD", "0.0"))
+    kdj_sell_j_threshold: float = float(os.getenv("KDJ_SELL_J_THRESHOLD", "100.0"))
+
     # Ultimate Scalping Strategy parameters
     ema_fast_length: int = int(os.getenv("EMA_FAST_LENGTH", "20"))
     ema_slow_length: int = int(os.getenv("EMA_SLOW_LENGTH", "50"))

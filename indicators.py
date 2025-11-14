@@ -74,6 +74,38 @@ class IndicatorEngine:
         rsi = 100.0 - (100.0 / (1.0 + rs))
         return rsi
 
+    def compute_kdj(
+        self,
+        df: pd.DataFrame,
+        period: Optional[int] = None,
+        k_smoothing: Optional[int] = None,
+        d_smoothing: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Compute classic KDJ (stochastic) indicator."""
+        if df.empty:
+            return df.copy()
+
+        n = max(1, int(period if period is not None else self.cfg.kdj_period))
+        k_len = max(1, int(k_smoothing if k_smoothing is not None else self.cfg.kdj_k_smoothing))
+        d_len = max(1, int(d_smoothing if d_smoothing is not None else self.cfg.kdj_d_smoothing))
+
+        low_min = df["Low"].rolling(window=n, min_periods=1).min()
+        high_max = df["High"].rolling(window=n, min_periods=1).max()
+        denom = (high_max - low_min).replace(0, np.nan)
+        rsv = ((df["Close"] - low_min) / denom) * 100.0
+        rsv = rsv.fillna(method="ffill").fillna(50.0)
+
+        k_line = rsv.ewm(alpha=1 / k_len, adjust=False).mean()
+        d_line = k_line.ewm(alpha=1 / d_len, adjust=False).mean()
+        j_line = 3.0 * k_line - 2.0 * d_line
+
+        out = df.copy()
+        out["K"] = k_line
+        out["D"] = d_line
+        out["J"] = j_line
+        return out
+
+
     def compute_supertrend(self, df_atr: pd.DataFrame, factor: float) -> dict:
         """基于 ATR 平台生成 SuperTrend 上下轨、趋势状态等结果。"""
         c = df_atr["Close"].to_numpy()

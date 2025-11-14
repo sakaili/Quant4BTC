@@ -501,6 +501,40 @@ class SuperTrendStrategy(Strategy):
             macd_allowed = True
             dif_val = dea_val = None
 
+        kdj_filter_enabled = getattr(self.cfg, "enable_kdj_filter", True)
+        kdj_allowed = True
+        kdj_j_val = None
+        if kdj_filter_enabled and current_signal != 0:
+            kdj_df = self.ind.compute_kdj(
+                df_atr,
+                period=getattr(self.cfg, "kdj_period", 9),
+                k_smoothing=getattr(self.cfg, "kdj_k_smoothing", 3),
+                d_smoothing=getattr(self.cfg, "kdj_d_smoothing", 3),
+            )
+            if kdj_df.empty or "J" not in kdj_df.columns:
+                kdj_allowed = False
+            else:
+                j_series = kdj_df["J"].dropna()
+                if j_series.empty:
+                    kdj_allowed = False
+                else:
+                    kdj_j_val = float(j_series.iloc[-1])
+                    buy_thr = float(getattr(self.cfg, "kdj_buy_j_threshold", 10.0))
+                    sell_thr = float(getattr(self.cfg, "kdj_sell_j_threshold", 90.0))
+                    if current_signal > 0:
+                        kdj_allowed = kdj_j_val < buy_thr
+                    elif current_signal < 0:
+                        kdj_allowed = kdj_j_val > sell_thr
+            if not kdj_allowed:
+                self.logger.info(
+                    "KDJ filter blocked signal=%s with J=%s (buy<=%.2f sell>=%.2f)",
+                    current_signal,
+                    f"{kdj_j_val:.2f}" if kdj_j_val is not None else "NA",
+                    getattr(self.cfg, "kdj_buy_j_threshold", 10.0),
+                    getattr(self.cfg, "kdj_sell_j_threshold", 90.0),
+                )
+                current_signal = 0
+
         selection_info = {}
         if hasattr(self.selector, "last_selection_info"):
             selection_info = self.selector.last_selection_info() or {}
@@ -518,17 +552,25 @@ class SuperTrendStrategy(Strategy):
             source_desc = f"{source_desc}|reuse"
         factor_display = float(selection_info.get("factor") or best_factor)
 
+        kdj_status = (
+            "???"
+            if not getattr(self.cfg, "enable_kdj_filter", True)
+            else ("??" if kdj_allowed or current_signal == 0 else "??")
+        )
         self.logger.info(
-            "[%s] 信号:%s 因子:%.3f 来源:%s 收盘价:%.4f MACD过滤:%s DIF:%s DEA:%s",
+            "[%s] ??:%s ??:%.3f ??:%s ???:%.4f MACD??:%s DIF:%s DEA:%s KDJ??:%s J:%s",
             self.cfg.symbol,
             current_signal,
             factor_display,
             source_desc,
             last_close,
-            "启用" if self.cfg.use_macd_filter else "未启用",
+            "??" if self.cfg.use_macd_filter else "???",
             f"{dif_val:.6f}" if dif_val is not None else "NA",
             f"{dea_val:.6f}" if dea_val is not None else "NA",
+            kdj_status,
+            f"{kdj_j_val:.2f}" if kdj_j_val is not None else "NA",
         )
+
 
         long_amt, short_amt = self.pos_reader._hedge_amounts()
 
@@ -834,45 +876,53 @@ class SuperTrendStrategy(Strategy):
         take_profit_pct = self.cfg.scalping_take_profit_pct  # 0.2% (已考虑杠杆)
 
         if current_long > 0 and self._entry_price_long:
-            # 多头仓位的止损和止盈
+            # ??????????
             stop_price = self._entry_price_long * (1.0 - stop_loss_pct / 100.0)
             tp_price = self._entry_price_long * (1.0 + take_profit_pct / 100.0)
             hedge_ps = "long" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 下止损单（平多仓）
-            self.exec.place_stop("sell", current_long, stop_price, hedge_ps, reduce_only=True)
+            # ???????Maker????
+            self.exec.place_limit_order("sell", current_long, stop_price, True, hedge_ps)
             self.logger.info(
-                "🛑 多头止损单: 入场价=%.2f, 止损价=%.2f (%.3f%%)",
-                self._entry_price_long, stop_price, stop_loss_pct
+                "?? ?????Maker?: ???=%.2f, ???=%.2f (%.3f%%)",
+                self._entry_price_long,
+                stop_price,
+                stop_loss_pct,
             )
 
-            # 下止盈单（平多仓）
+            # ???????????
             if self.cfg.use_take_profit:
-                self.exec.place_take_profit("sell", current_long, tp_price, hedge_ps, reduce_only=True)
+                self.exec.place_limit_order("sell", current_long, tp_price, True, hedge_ps)
                 self.logger.info(
-                    "🎯 多头止盈单: 入场价=%.2f, 止盈价=%.2f (%.3f%%)",
-                    self._entry_price_long, tp_price, take_profit_pct
+                    "?? ?????Maker?: ???=%.2f, ???=%.2f (%.3f%%)",
+                    self._entry_price_long,
+                    tp_price,
+                    take_profit_pct,
                 )
 
         elif current_short > 0 and self._entry_price_short:
-            # 空头仓位的止损和止盈
+            # ??????????
             stop_price = self._entry_price_short * (1.0 + stop_loss_pct / 100.0)
             tp_price = self._entry_price_short * (1.0 - take_profit_pct / 100.0)
             hedge_ps = "short" if self.cfg.position_mode.lower() == "hedge" else None
 
-            # 下止损单（平空仓）
-            self.exec.place_stop("buy", current_short, stop_price, hedge_ps, reduce_only=True)
+            # ???????Maker????
+            self.exec.place_limit_order("buy", current_short, stop_price, True, hedge_ps)
             self.logger.info(
-                "🛑 空头止损单: 入场价=%.2f, 止损价=%.2f (%.3f%%)",
-                self._entry_price_short, stop_price, stop_loss_pct
+                "?? ?????Maker?: ???=%.2f, ???=%.2f (%.3f%%)",
+                self._entry_price_short,
+                stop_price,
+                stop_loss_pct,
             )
 
-            # 下止盈单（平空仓）
+            # ???????????
             if self.cfg.use_take_profit:
-                self.exec.place_take_profit("buy", current_short, tp_price, hedge_ps, reduce_only=True)
+                self.exec.place_limit_order("buy", current_short, tp_price, True, hedge_ps)
                 self.logger.info(
-                    "🎯 空头止盈单: 入场价=%.2f, 止盈价=%.2f (%.3f%%)",
-                    self._entry_price_short, tp_price, take_profit_pct
+                    "?? ?????Maker?: ???=%.2f, ???=%.2f (%.3f%%)",
+                    self._entry_price_short,
+                    tp_price,
+                    take_profit_pct,
                 )
 
         action_str = "|".join(actions) if actions else None
